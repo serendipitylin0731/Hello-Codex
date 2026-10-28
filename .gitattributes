@@ -1,0 +1,9 @@
+* text=auto
+
+*.go text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.mod text eol=lf
+*.bat text eol=crlf
+*.vbs text eol=crlf

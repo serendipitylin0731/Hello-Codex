@@ -88,5 +88,6 @@ go test ./...
 go build -trimpath -o CodexQuotaPinger.exe .
 ```
 
-官方协议文档：<https://learn.chatgpt.com/docs/app-server>  
+官方协议文档：<https://learn.chatgpt.com/docs/app-server>
+
 模型文档：<https://developers.openai.com/api/docs/models/gpt-5.6-luna>
