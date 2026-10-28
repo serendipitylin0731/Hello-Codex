@@ -1,11 +1,30 @@
-# Codex Quota Pinger（Windows x64）
+# ChatGPT Plus 额度启动器
 
-本程序用于 **Codex 本地 App Server**。它不是对 ChatGPT 网页输入框的自动点击，也不会向已有 ChatGPT Work 会话发消息；触发时会创建新的 Codex 会话，并将字符串 `1` 作为用户输入发送。
+<p align="center"><img src="assets/logo.png" width="128" alt="ChatGPT Plus 额度启动器 Logo"></p>
 
-## 先决条件
+这是一个为 **ChatGPT Plus 订阅用户**设计的 Windows Codex 额度启动器。程序通过本机 Codex App Server 读取账户返回的五小时额度窗口，在满足你设置的时区、禁用时段与重置条件时，创建新的 Codex 会话并发送指定内容。
 
-1. Windows 10/11 x64。需要运行时，电脑应保持开机、联网；系统休眠期间不会触发。
-2. 安装官方 **Codex CLI** 并使用 **ChatGPT 账户**登录：
+本项目是独立的开源工具，与 OpenAI 无隶属关系，也未获得 OpenAI 背书。
+
+## 主要功能
+
+- 原生 Windows 图形界面，显示 ChatGPT 登录类型、订阅计划、五小时额度、使用率和下次重置时间
+- 可选择任意 Windows 时区
+- 可设置禁用开始和结束时间，支持跨午夜，例如 `22:00–06:00`
+- 自动监控，也可点击“手动发送”立即要求发送
+- 手动发送会忽略禁用时段和额度阈值，但每次都会显示确认窗口
+- 系统托盘常驻图标；双击图标恢复主窗口
+- 关闭窗口时询问：隐藏到后台、完全退出或取消关闭
+- 可选择随 Windows 登录自动启动，并以后台托盘模式运行
+- 同一额度窗口防重复；超时或断线时保守记录不确定状态，避免盲目重复发送
+- 界面、托盘通知和日志会明确报告错误原因、处理建议与日志路径
+- 不需要 OpenAI API Key，也不会保存 ChatGPT 密码；使用本机已经登录的 Codex CLI
+
+## 安装
+
+1. 从 [GitHub Releases](https://github.com/serendipitylin0731/codex-preuse/releases) 下载 `ChatGPTPlusQuotaLauncherSetup.exe`。
+2. 运行安装程序。默认安装到当前用户目录，不要求管理员权限。
+3. 安装官方 Codex CLI，并使用 ChatGPT 账户登录：
 
    ```powershell
    npm install -g @openai/codex@latest
@@ -13,81 +32,101 @@
    codex --version
    ```
 
-   如果 `codex` 不在 PATH 中，请修改 `config.json` 的 `codex_path`，填写 `codex.exe` 或 `codex.cmd` 的完整路径。
+4. 打开“ChatGPT Plus 额度启动器”，选择时区和禁用时段。
+5. 点击“立即检查”，确认界面显示 ChatGPT 登录以及 300 分钟额度窗口。
+6. 保存设置并启动监控。
 
-3. 账户需要能通过 App Server 读取一个 `windowDurationMins=300` 且带 `resetsAt` 的额度窗口，并能在 Codex 中使用 `gpt-5.6-luna`。API 模型目录中存在该模型，并不保证每个 ChatGPT/Codex 计划都有访问权限。程序不会改用付费 API Key 调用。
+当前安装包是未进行商业代码签名的社区构建，Windows SmartScreen 可能要求确认。运行前请核对 Release 页面提供的 SHA-256。
 
-## 快速开始
+## 默认规则
 
-1. 将 ZIP **完整解压到普通用户可写目录**，例如 `C:\Users\<你>\CodexQuotaPinger\`。不要只单独运行 EXE，也不要放在通常需要管理员权限的 `Program Files` 下。
-2. 双击 `inspect_limits.bat`：只显示账户可见额度窗口，不发送消息。寻找 `duration=300m` 并确认 `BUCKET` 名称；如果不是 `codex`，将其填入 `config.json` 的 `limit_id`。
-3. 双击 `check_once.bat`：读取真实额度并执行一次 **dry run**；即使满足触发条件也不会发送。
-4. 双击 `start.bat` 持续在前台运行，或双击 `start_hidden.vbs` 在后台运行。进程退出后调度停止，日志位于同一目录的 `pinger.log`。
-5. 如需登录 Windows 后自启动：按 `Win+R`，输入 `shell:startup`，在打开的启动文件夹中创建指向 `start_hidden.vbs` 的快捷方式。
-
-## 固定规则
-
-| 条件 | 行为 |
+| 项目 | 默认值 |
 |---|---|
-| UTC 16:00:00 至 20:59:59 | 禁止发送，也不查询额度 |
-| 其他 UTC 时间 | 每 120 秒查询一次 Codex 额度 |
-| `windowDurationMins=300` 且 `resetsAt - 当前时间` **严格大于** 17940 秒 | 创建 Codex 会话，使用 `gpt-5.6-luna`、`low`，输入 `1` |
-| App Server 确认接受 `turn/start` | 等待 600 秒，不读取或管理模型回复 |
-| 未满足条件或请求失败 | 120 秒后再次检查 |
-| 同一额度窗口已经成功发送 | 跳过，防止重复 |
+| 目标用户 | ChatGPT Plus 订阅用户 |
+| 时区 | UTC，可在界面修改 |
+| 禁用时段 | `[16:00, 21:00)`，结束时间不包含在内 |
+| 检查间隔 | 120 秒 |
+| 额度桶 | `codex` |
+| 目标窗口 | 300 分钟 |
+| 触发条件 | 距离 `resetsAt` 严格大于 4 小时 59 分钟 |
+| 模型 | `gpt-5.6-luna` |
+| 思考强度 | `low` |
+| 发送内容 | `1` |
 
-重要：2 分钟轮询间隔 **大于** 1 分钟触发区间，所以可能完全错过某次新窗口。这是需求规则的直接结果。进入禁用时段前已经接受的后台任务不会被本程序中止。
+模型、思考强度、发送内容、时区、禁用时段、Codex CLI 路径、额度桶和检查间隔都可以在界面修改。
 
-## 配置
+> 120 秒轮询周期大于 1 分钟触发区间，因此自动模式可能错过某个新窗口。这是当前默认规则的直接结果。需要时可在界面缩短检查间隔，最低为 30 秒。
 
-`config.json` 默认内容：
+## 手动发送
 
-```json
-{
-  "codex_path": "codex",
-  "limit_id": "codex",
-  "model": "gpt-5.6-luna",
-  "effort": "low",
-  "message": "1",
-  "poll_seconds": 120,
-  "success_sleep_seconds": 600,
-  "disabled_utc_start_hour": 16,
-  "disabled_utc_end_hour": 21
-}
+点击“手动发送”后，程序会先保存并校验当前设置，再显示确认窗口。只有选择“是”才会创建新的 Codex 会话。手动发送：
+
+- 忽略当前是否处于禁用时段；
+- 忽略额度重置阈值；
+- 使用界面中的模型、思考强度和发送内容；
+- 会消耗 ChatGPT Plus/Codex 使用额度；
+- 不等待或读取模型的最终回答，只确认任务是否已被 App Server 接受。
+
+## 后台运行与开机启动
+
+- 程序运行时始终显示系统托盘图标。
+- 双击托盘图标或选择“显示主窗口”可恢复界面。
+- 点击窗口关闭按钮时，程序询问是否隐藏到后台或完全退出。
+- 勾选“随 Windows 登录自动启动”并保存后，程序写入当前用户的 Windows Run 项；取消勾选会移除它。
+- 安装程序也提供一个可选的开机启动选项。
+
+## 文件位置
+
+程序数据保存在：
+
+```text
+%LOCALAPPDATA%\ChatGPTPlusQuotaLauncher\
 ```
 
-修改配置后需要重启程序。
+其中：
 
-## 日志与状态
+- `settings.json`：界面设置；
+- `state.json`：自动发送去重与不确定状态；
+- `launcher.log`：详细日志；
+- `codex_workspace\`：只读 Codex 任务使用的本地工作目录。
 
-- `pinger.log`：UTC 日志；超过 5 MB 时轮换为 `pinger.log.old`。
-- `state.json`：记录最后成功提交对应的重置时间和 Codex thread ID，程序重启后仍可防重复。
-- `pending_reset_at`：请求已开始提交，但超时或断线导致结果不确定时保留。请先检查日志并确认远端结果，再考虑手动将其设为 `0`。
-- `turn/start` 被接受不代表模型已经完成，也不保证额度窗口已经刷新。程序按要求不读取最终回复。
-- 没有 5 小时窗口、窗口未启动、缺少重置时间或 CLI 未登录时，程序会安全跳过，不猜测重置时间。
+## 常见问题
 
-## 手动排查
+### 未找到 Codex CLI
+
+确认 PowerShell 中能运行 `codex --version`。也可在界面的“Codex CLI”字段选择 `codex.exe` 或 `codex.cmd` 的完整路径。
+
+### 显示的登录不是 ChatGPT 或计划不是 Plus
+
+应用会显示 App Server 实际返回的登录类型和计划。请执行 `codex logout` 后重新运行 `codex login`，选择正确的 ChatGPT Plus 账户。应用不会把 API Key 额度当作 Plus 订阅额度。
+
+### 找不到 300 分钟窗口
+
+确认额度桶名称正确，默认是 `codex`。额度窗口由账户和当前 Codex 服务返回；程序不会猜测重置时间。
+
+### 手动发送或自动发送失败
+
+界面会显示可操作的错误说明。点击“打开完整日志”查看技术细节，并检查：
+
+- Codex CLI 是否为最新版本；
+- ChatGPT Plus 登录是否仍有效；
+- 当前账户是否有权使用设置的模型；
+- 网络或安全软件是否阻止 `codex app-server`。
+
+## 开发与构建
+
+需要 Windows 和 .NET 8 SDK：
 
 ```powershell
-.\CodexQuotaPinger.exe -version
-.\CodexQuotaPinger.exe -inspect
-.\CodexQuotaPinger.exe -once -dry-run
+dotnet build src/PlusQuotaLauncher/PlusQuotaLauncher.csproj -c Release
+dotnet run --project tests/PlusQuotaLauncher.Core.Tests/PlusQuotaLauncher.Core.Tests.csproj -c Release
+dotnet publish src/PlusQuotaLauncher/PlusQuotaLauncher.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish
 ```
 
-- `Codex CLI missing`：确认同一 Windows 用户的 PowerShell 可以运行 `codex --version`；修改 PATH 后请重新打开终端。
-- `SKIP no 300-minute window`：检查 `-inspect` 列出的桶名与窗口时长，必要时修改 `limit_id`。不要选择不相关的额度桶。
-- 模型无权限：账户的 Codex 可能没有 `gpt-5.6-luna`。程序不会静默回退到其他模型。
-- `another CodexQuotaPinger is already running`：已有实例持有单实例锁，请先在任务管理器中确认现有进程。
+GitHub Actions 会运行回归测试、生成自包含 Windows x64 应用，并通过经过签名验证的 Inno Setup 7 生成一个安装程序 EXE。Release 只发布安装包，不再发布整个 ZIP。
 
-## 源码与构建
+## 官方资料
 
-项目仅使用 Go 标准库，无第三方运行时依赖；运行时仍需要 Codex CLI。安装 Go 1.23 或更高版本后：
-
-```powershell
-go test ./...
-go build -trimpath -o CodexQuotaPinger.exe .
-```
-
-官方协议文档：<https://learn.chatgpt.com/docs/app-server>
-
-模型文档：<https://developers.openai.com/api/docs/models/gpt-5.6-luna>
+- <https://learn.chatgpt.com/docs/pricing>
+- <https://learn.chatgpt.com/docs/app-server>
+- <https://learn.chatgpt.com/docs/developer-commands>

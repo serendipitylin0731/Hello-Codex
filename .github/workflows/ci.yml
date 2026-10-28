@@ -11,60 +11,68 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - run: go test ./...
-      - run: go vet ./...
-
-  build-windows:
-    name: Build Windows x64
-    needs: test
+  build-installer:
+    name: Test and build Windows installer
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-dotnet@v4
         with:
-          go-version-file: go.mod
-          cache: false
-      - name: Build executable
-        shell: pwsh
-        run: go build -trimpath -ldflags='-s -w' -o dist/CodexQuotaPinger.exe .
-      - name: Stage package
+          dotnet-version: '8.0.x'
+      - name: Build desktop app
+        run: dotnet build src/PlusQuotaLauncher/PlusQuotaLauncher.csproj -c Release --nologo
+      - name: Run core regression tests
+        run: dotnet run --project tests/PlusQuotaLauncher.Core.Tests/PlusQuotaLauncher.Core.Tests.csproj -c Release --nologo
+      - name: Publish self-contained Windows x64 app
         shell: pwsh
         run: |
-          $package = 'dist/CodexQuotaPinger'
-          New-Item -ItemType Directory -Force -Path $package | Out-Null
-          Copy-Item dist/CodexQuotaPinger.exe, config.json, start.bat, start_hidden.vbs, check_once.bat, inspect_limits.bat, README.md, README_zh.md, LICENSE.txt -Destination $package
-          Compress-Archive -Path "$package/*" -DestinationPath dist/CodexQuotaPinger_Windows_x64.zip -CompressionLevel Optimal
+          dotnet publish src/PlusQuotaLauncher/PlusQuotaLauncher.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:PublishTrimmed=false `
+            -o artifacts/publish --nologo
+      - name: Install verified Inno Setup compiler
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe'
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.0-x64.exe'
+          $innoDir = Join-Path $env:RUNNER_TEMP 'InnoSetup'
+          Invoke-WebRequest $url -OutFile $installer
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B\.V\.') {
+            throw "Inno Setup signature verification failed: $($signature.Status) $($signature.SignerCertificate.Subject)"
+          }
+          $process = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/PORTABLE=1', "/DIR=$innoDir"
+          )
+          if ($process.ExitCode -ne 0) { throw "Inno Setup installer exited with $($process.ExitCode)" }
+          "INNO_ISCC=$innoDir\ISCC.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Build single-file installer
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '2.0.0' }
+          $publish = (Resolve-Path 'artifacts/publish').Path
+          $output = Join-Path $PWD 'artifacts/installer'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          & $env:INNO_ISCC "/DMyAppVersion=$version" "/DPublishDir=$publish" "/DOutputDir=$output" 'installer/PlusQuotaLauncher.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: CodexQuotaPinger-Windows-x64
-          path: dist/CodexQuotaPinger_Windows_x64.zip
+          name: ChatGPTPlusQuotaLauncherSetup
+          path: artifacts/installer/ChatGPTPlusQuotaLauncherSetup.exe
           if-no-files-found: error
 
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-windows
+    needs: build-installer
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v5
         with:
-          name: CodexQuotaPinger-Windows-x64
-      - name: Create release
+          name: ChatGPTPlusQuotaLauncherSetup
+      - name: Create release with installer
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" CodexQuotaPinger_Windows_x64.zip --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag
+        run: gh release create "${GITHUB_REF_NAME}" ChatGPTPlusQuotaLauncherSetup.exe --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag

@@ -8,6 +8,10 @@ codex_workspace/
 # Build output
 CodexQuotaPinger.exe
 dist/
+bin/
+obj/
+artifacts/
+TestResults/
 
 # Editor/OS files
 .idea/
