@@ -16,6 +16,7 @@ public sealed class AppSettings
     public string TimeZoneId { get; set; } = "UTC";
     public TimeOnly DisabledStart { get; set; } = new(16, 0);
     public TimeOnly DisabledEnd { get; set; } = new(21, 0);
+    public List<DisabledTimeRange>? DisabledRanges { get; set; }
     public bool StartMonitoringOnLaunch { get; set; } = true;
     public string UiTheme { get; set; } = "system";
 
@@ -40,8 +41,16 @@ public sealed class AppSettings
             throw new LauncherException("发送后的等待时间必须在 1 秒到 24 小时之间。", "建议保持默认的 600 秒。");
         if (WindowMinutes < 1 || TriggerThresholdSeconds < 0)
             throw new LauncherException("额度窗口或触发阈值无效。", "恢复默认设置后重试。");
-        if (DisabledStart == DisabledEnd)
-            throw new LauncherException("禁用开始和结束时间不能相同。", "请选择一个有效的禁用时段。");
+        var ranges = GetDisabledRanges();
+        for (var index = 0; index < ranges.Count; index++)
+        {
+            if (ranges[index].Start == ranges[index].End)
+            {
+                throw new LauncherException(
+                    $"第 {index + 1} 个免打扰时间段的开始和结束时间不能相同。",
+                    "请修改或移除该时间段。");
+            }
+        }
         if (UiTheme is not ("system" or "light" or "dark"))
             throw new LauncherException("界面主题设置无效。", "请选择跟随系统、浅色或深色。");
         try
@@ -57,6 +66,25 @@ public sealed class AppSettings
             throw new LauncherException("所选时区数据损坏。", "在 Windows 中修复时区设置，或选择 UTC。", ex);
         }
     }
+
+    public IReadOnlyList<DisabledTimeRange> GetDisabledRanges() =>
+        DisabledRanges ?? [new DisabledTimeRange(DisabledStart, DisabledEnd)];
+}
+
+public sealed class DisabledTimeRange
+{
+    public DisabledTimeRange()
+    {
+    }
+
+    public DisabledTimeRange(TimeOnly start, TimeOnly end)
+    {
+        Start = start;
+        End = end;
+    }
+
+    public TimeOnly Start { get; set; }
+    public TimeOnly End { get; set; }
 }
 
 public sealed class AppState

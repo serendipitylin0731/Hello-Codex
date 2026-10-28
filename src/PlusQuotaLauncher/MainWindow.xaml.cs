@@ -1,4 +1,5 @@
 using PlusQuotaLauncher.Core;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -17,6 +18,11 @@ public partial class MainWindow : Window
 {
     private sealed record TimeZoneChoice(string Id, string Display);
     private sealed record ThemeChoice(string Id, string Display);
+    private sealed class DisabledRangeEditor
+    {
+        public string Start { get; set; } = "16:00";
+        public string End { get; set; } = "21:00";
+    }
 
     private readonly JsonFileStore<AppSettings> _settingsStore;
     private readonly QuotaCoordinator _coordinator;
@@ -24,6 +30,7 @@ public partial class MainWindow : Window
     private readonly bool _startHidden;
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly DrawingIcon _trayDrawingIcon;
+    private readonly ObservableCollection<DisabledRangeEditor> _disabledRangeEditors = [];
     private AppSettings _settings;
     private CancellationTokenSource? _monitorCancellation;
     private Task? _monitorTask;
@@ -48,6 +55,7 @@ public partial class MainWindow : Window
         _startHidden = startHidden;
 
         InitializeComponent();
+        DisabledRangesItems.ItemsSource = _disabledRangeEditors;
         LoadSettingsIntoUi();
 
         var trayMenu = new Forms.ContextMenuStrip();
@@ -87,8 +95,15 @@ public partial class MainWindow : Window
             ? _settings.TimeZoneId
             : "UTC";
 
-        DisabledStartCombo.Text = _settings.DisabledStart.ToString("HH:mm", CultureInfo.InvariantCulture);
-        DisabledEndCombo.Text = _settings.DisabledEnd.ToString("HH:mm", CultureInfo.InvariantCulture);
+        _disabledRangeEditors.Clear();
+        foreach (var range in _settings.GetDisabledRanges())
+        {
+            _disabledRangeEditors.Add(new DisabledRangeEditor
+            {
+                Start = range.Start.ToString("HH:mm", CultureInfo.InvariantCulture),
+                End = range.End.ToString("HH:mm", CultureInfo.InvariantCulture)
+            });
+        }
 
         ModelBox.Text = _settings.Model;
         EffortCombo.ItemsSource = new[] { "none", "low", "medium", "high", "xhigh", "max" };
@@ -117,10 +132,17 @@ public partial class MainWindow : Window
         var zoneId = TimeZoneCombo.SelectedValue as string;
         if (string.IsNullOrWhiteSpace(zoneId))
             throw new LauncherException("请选择时区。", "从时区列表中选择一个项目。");
-        if (!TryParseTime(DisabledStartCombo.Text, out var disabledStart) ||
-            !TryParseTime(DisabledEndCombo.Text, out var disabledEnd))
+        var disabledRanges = new List<DisabledTimeRange>();
+        for (var index = 0; index < _disabledRangeEditors.Count; index++)
         {
-            throw new LauncherException("免打扰时间格式无效。", "请输入 HH:mm，例如 22:00 或 06:30。");
+            var editor = _disabledRangeEditors[index];
+            if (!TryParseTime(editor.Start, out var start) || !TryParseTime(editor.End, out var end))
+            {
+                throw new LauncherException(
+                    $"第 {index + 1} 个免打扰时间段格式无效。",
+                    "请输入 HH:mm，例如 22:00 或 06:30。");
+            }
+            disabledRanges.Add(new DisabledTimeRange(start, end));
         }
         if (!int.TryParse(PollSecondsBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var pollSeconds))
             throw new LauncherException("检查间隔必须是整数。", "请输入 30 到 86400 之间的秒数。");
@@ -137,8 +159,9 @@ public partial class MainWindow : Window
             WindowMinutes = _settings.WindowMinutes,
             TriggerThresholdSeconds = _settings.TriggerThresholdSeconds,
             TimeZoneId = zoneId,
-            DisabledStart = disabledStart,
-            DisabledEnd = disabledEnd,
+            DisabledStart = disabledRanges.FirstOrDefault()?.Start ?? _settings.DisabledStart,
+            DisabledEnd = disabledRanges.FirstOrDefault()?.End ?? _settings.DisabledEnd,
+            DisabledRanges = disabledRanges,
             StartMonitoringOnLaunch = MonitorOnLaunchBox.IsChecked == true,
             UiTheme = ThemeCombo.SelectedValue as string ?? "system"
         };
@@ -627,6 +650,17 @@ public partial class MainWindow : Window
     }
 
     private void BrowseCodexButton_Click(object sender, RoutedEventArgs e) => BrowseCodex();
+
+    private void AddDisabledRangeButton_Click(object sender, RoutedEventArgs e)
+    {
+        _disabledRangeEditors.Add(new DisabledRangeEditor { Start = "22:00", End = "06:00" });
+    }
+
+    private void RemoveDisabledRangeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DisabledRangeEditor editor })
+            _disabledRangeEditors.Remove(editor);
+    }
 
     private void OpenLogButton_Click(object sender, RoutedEventArgs e) => OpenLog();
 

@@ -6,12 +6,13 @@ public static class SchedulePolicy
     {
         var local = TimeZoneInfo.ConvertTime(utcNow, settings.SelectedTimeZone);
         var current = TimeOnly.FromDateTime(local.DateTime);
-        var start = settings.DisabledStart;
-        var end = settings.DisabledEnd;
-        return start < end
-            ? current >= start && current < end
-            : current >= start || current < end;
+        return settings.GetDisabledRanges().Any(range => IsInRange(current, range));
     }
+
+    private static bool IsInRange(TimeOnly current, DisabledTimeRange range) =>
+        range.Start < range.End
+            ? current >= range.Start && current < range.End
+            : current >= range.Start || current < range.End;
 
     public static bool ShouldAutoSend(DateTimeOffset utcNow, QuotaWindow window, AppSettings settings)
     {

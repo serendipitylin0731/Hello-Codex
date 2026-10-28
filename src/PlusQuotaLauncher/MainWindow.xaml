@@ -551,19 +551,43 @@
                             <TextBlock Text="时区" Style="{StaticResource FieldLabel}" />
                             <ComboBox x:Name="TimeZoneCombo" />
 
-                            <TextBlock Text="免打扰时段" Style="{StaticResource FieldLabel}" Margin="0,18,0,7" />
-                            <Grid>
+                            <Grid Margin="0,18,0,7">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="42" />
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBox x:Name="DisabledStartCombo" TextAlignment="Center" />
-                                <TextBlock Grid.Column="1" Text="至" Foreground="{DynamicResource MutedBrush}"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                <TextBox x:Name="DisabledEndCombo" Grid.Column="2" TextAlignment="Center" />
+                                <TextBlock Text="免打扰时段" Style="{StaticResource FieldLabel}" Margin="0" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Content="＋ 添加时间段" Style="{StaticResource SecondaryButton}"
+                                        Padding="12,6" MinHeight="0" Click="AddDisabledRangeButton_Click" />
                             </Grid>
-                            <TextBlock Text="此时间段内暂停自动检查，支持跨午夜。" Style="{StaticResource HintText}" Margin="0,7,0,0" />
+                            <ItemsControl x:Name="DisabledRangesItems">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource SoftBackgroundBrush}" CornerRadius="10"
+                                                Padding="10" Margin="0,0,0,7">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="38" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox Text="{Binding Start, UpdateSourceTrigger=PropertyChanged}"
+                                                         TextAlignment="Center" />
+                                                <TextBlock Grid.Column="1" Text="至" Foreground="{DynamicResource MutedBrush}"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="2" Text="{Binding End, UpdateSourceTrigger=PropertyChanged}"
+                                                         TextAlignment="Center" />
+                                                <Button Grid.Column="3" Content="移除" Style="{StaticResource GhostButton}"
+                                                        Foreground="{DynamicResource MutedBrush}" Padding="11,7" MinHeight="0"
+                                                        Margin="8,0,0,0" Tag="{Binding}" Click="RemoveDisabledRangeButton_Click" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="多个时段按并集生效；支持跨午夜。未添加时段则不暂停自动检查。"
+                                       Style="{StaticResource HintText}" Margin="0,0,0,0" TextWrapping="Wrap" />
 
                             <TextBlock Text="发送内容" Style="{StaticResource FieldLabel}" Margin="0,18,0,7" />
                             <TextBox x:Name="MessageBox" />

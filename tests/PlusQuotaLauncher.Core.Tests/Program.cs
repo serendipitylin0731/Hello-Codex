@@ -25,6 +25,36 @@ Check(SchedulePolicy.IsDisabled(new DateTimeOffset(2026, 10, 29, 16, 0, 0, TimeS
 Check(SchedulePolicy.IsDisabled(new DateTimeOffset(2026, 10, 29, 20, 59, 59, TimeSpan.Zero), settings), "inside disabled range");
 Check(!SchedulePolicy.IsDisabled(new DateTimeOffset(2026, 10, 29, 21, 0, 0, TimeSpan.Zero), settings), "disabled end exclusive");
 
+settings.DisabledRanges =
+[
+    new DisabledTimeRange(new TimeOnly(8, 0), new TimeOnly(9, 30)),
+    new DisabledTimeRange(new TimeOnly(12, 0), new TimeOnly(13, 0)),
+    new DisabledTimeRange(new TimeOnly(22, 0), new TimeOnly(6, 0))
+];
+Check(SchedulePolicy.IsDisabled(new DateTimeOffset(2026, 10, 29, 8, 15, 0, TimeSpan.Zero), settings), "first disabled range in union");
+Check(SchedulePolicy.IsDisabled(new DateTimeOffset(2026, 10, 29, 12, 30, 0, TimeSpan.Zero), settings), "second disabled range in union");
+Check(SchedulePolicy.IsDisabled(new DateTimeOffset(2026, 10, 29, 23, 0, 0, TimeSpan.Zero), settings), "overnight disabled range in union");
+Check(!SchedulePolicy.IsDisabled(new DateTimeOffset(2026, 10, 29, 10, 0, 0, TimeSpan.Zero), settings), "outside disabled range union");
+settings.DisabledRanges = [];
+Check(!SchedulePolicy.IsDisabled(new DateTimeOffset(2026, 10, 29, 16, 30, 0, TimeSpan.Zero), settings), "empty disabled range union");
+settings.DisabledRanges = null;
+var legacySettings = JsonSerializer.Deserialize<AppSettings>("""
+{
+  "TimeZoneId": "UTC",
+  "DisabledStart": "07:30:00",
+  "DisabledEnd": "08:45:00"
+}
+""")!;
+Check(legacySettings.GetDisabledRanges() is [{ Start: var legacyStart, End: var legacyEnd }] &&
+      legacyStart == new TimeOnly(7, 30) && legacyEnd == new TimeOnly(8, 45),
+    "legacy disabled range migrates");
+var rangeRoundTrip = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(new AppSettings
+{
+    DisabledRanges = [new DisabledTimeRange(new TimeOnly(9, 0), new TimeOnly(10, 0))]
+}))!;
+Check(rangeRoundTrip.GetDisabledRanges() is [{ Start: var roundTripStart }] && roundTripStart == new TimeOnly(9, 0),
+    "multiple disabled ranges serialize");
+
 var now = new DateTimeOffset(2026, 10, 29, 10, 0, 0, TimeSpan.Zero);
 var exact = new QuotaWindow("codex", "primary", 0, 300, now.AddSeconds(settings.TriggerThresholdSeconds).ToUnixTimeSeconds());
 var over = exact with { ResetsAt = exact.ResetsAt + 1 };
