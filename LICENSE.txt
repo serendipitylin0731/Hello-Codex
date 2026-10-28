@@ -1,0 +1,3 @@
+Codex Quota Pinger is provided as-is, without warranty.
+You may modify and use this generated source code for your own purposes.
+Not affiliated with or endorsed by OpenAI.

@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test ./...
+      - run: go vet ./...
+
+  build-windows:
+    name: Build Windows x64
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build executable
+        shell: pwsh
+        run: go build -trimpath -ldflags='-s -w' -o dist/CodexQuotaPinger.exe .
+      - name: Stage package
+        shell: pwsh
+        run: |
+          $package = 'dist/CodexQuotaPinger'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item dist/CodexQuotaPinger.exe, config.json, start.bat, start_hidden.vbs, check_once.bat, inspect_limits.bat, README.md, README_zh.md, LICENSE.txt -Destination $package
+          Compress-Archive -Path "$package/*" -DestinationPath dist/CodexQuotaPinger_Windows_x64.zip -CompressionLevel Optimal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CodexQuotaPinger-Windows-x64
+          path: dist/CodexQuotaPinger_Windows_x64.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: CodexQuotaPinger-Windows-x64
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" CodexQuotaPinger_Windows_x64.zip --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag

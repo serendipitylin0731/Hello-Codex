@@ -1,0 +1,16 @@
+# Local runtime state
+pinger.log
+pinger.log.old
+state.json
+state.json.tmp
+codex_workspace/
+
+# Build output
+CodexQuotaPinger.exe
+dist/
+
+# Editor/OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
