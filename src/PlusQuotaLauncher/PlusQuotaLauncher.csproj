@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -10,7 +11,7 @@
     <AssemblyName>ChatGPTPlusQuotaLauncher</AssemblyName>
     <RootNamespace>PlusQuotaLauncher</RootNamespace>
     <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
-    <Version>2.0.1</Version>
+    <Version>2.1.0</Version>
     <Authors>serendipitylin0731</Authors>
     <Product>ChatGPT Plus 额度启动器</Product>
     <Description>为 ChatGPT Plus 订阅用户设计的 Codex 额度启动器</Description>
@@ -21,6 +22,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\PlusQuotaLauncher.Core\PlusQuotaLauncher.Core.csproj" />
-    <EmbeddedResource Include="..\..\assets\logo.png" LogicalName="PlusQuotaLauncher.logo.png" />
+    <Resource Include="..\..\assets\logo.png" Link="Assets\logo.png" />
+    <Resource Include="..\..\assets\app.ico" Link="Assets\app.ico" />
   </ItemGroup>
 </Project>

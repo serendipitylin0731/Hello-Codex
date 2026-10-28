@@ -17,6 +17,7 @@ public sealed class AppSettings
     public TimeOnly DisabledStart { get; set; } = new(16, 0);
     public TimeOnly DisabledEnd { get; set; } = new(21, 0);
     public bool StartMonitoringOnLaunch { get; set; } = true;
+    public string UiTheme { get; set; } = "system";
 
     [JsonIgnore]
     public TimeZoneInfo SelectedTimeZone => TimeZoneInfo.FindSystemTimeZoneById(TimeZoneId);
@@ -41,6 +42,8 @@ public sealed class AppSettings
             throw new LauncherException("额度窗口或触发阈值无效。", "恢复默认设置后重试。");
         if (DisabledStart == DisabledEnd)
             throw new LauncherException("禁用开始和结束时间不能相同。", "请选择一个有效的禁用时段。");
+        if (UiTheme is not ("system" or "light" or "dark"))
+            throw new LauncherException("界面主题设置无效。", "请选择跟随系统、浅色或深色。");
         try
         {
             _ = SelectedTimeZone;

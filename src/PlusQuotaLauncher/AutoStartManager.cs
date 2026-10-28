@@ -19,7 +19,9 @@ internal static class AutoStartManager
                         Registry.CurrentUser.CreateSubKey(RunKey, true);
         if (enabled)
         {
-            var executable = Environment.ProcessPath ?? Application.ExecutablePath;
+            var executable = Environment.ProcessPath ??
+                             System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ??
+                             throw new InvalidOperationException("无法确定程序路径。");
             key.SetValue(ValueName, $"\"{executable}\" --background", RegistryValueKind.String);
         }
         else

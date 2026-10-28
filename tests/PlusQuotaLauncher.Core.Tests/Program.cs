@@ -51,6 +51,17 @@ Check(ProtocolValues.TurnReadOnlySandboxPolicy == "readOnly", "turn sandbox poli
 
 settings.Validate();
 Check(true, "default settings validate");
+Check(settings.UiTheme == "system", "default theme follows system");
+var invalidTheme = new AppSettings { UiTheme = "neon" };
+try
+{
+    invalidTheme.Validate();
+    Check(false, "invalid theme rejected");
+}
+catch (LauncherException)
+{
+    Check(true, "invalid theme rejected");
+}
 
 if (Environment.GetEnvironmentVariable("PLUS_QUOTA_LIVE") == "1")
 {

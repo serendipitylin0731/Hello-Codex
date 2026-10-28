@@ -1,4 +1,5 @@
 using PlusQuotaLauncher.Core;
+using System.Windows;
 
 namespace PlusQuotaLauncher;
 
@@ -16,12 +17,14 @@ internal static class Program
 
         AppPaths.EnsureCreated();
         var logger = new AppLogger(AppPaths.LogFile);
-        ApplicationConfiguration.Initialize();
-        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        var application = new System.Windows.Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        MainWindow? mainWindow = null;
 
-        MainForm? mainForm = null;
-        Application.ThreadException += (_, eventArgs) =>
-            ErrorReporter.Show(mainForm, "界面错误", eventArgs.Exception, logger);
+        application.DispatcherUnhandledException += (_, eventArgs) =>
+        {
+            ErrorReporter.Show(mainWindow, "界面错误", eventArgs.Exception, logger);
+            eventArgs.Handled = true;
+        };
         AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
         {
             if (eventArgs.ExceptionObject is Exception exception)
@@ -33,6 +36,7 @@ internal static class Program
             eventArgs.SetObserved();
         };
 
+        QuotaCoordinator? coordinator = null;
         try
         {
             var settingsStore = new JsonFileStore<AppSettings>(AppPaths.SettingsFile);
@@ -46,31 +50,33 @@ internal static class Program
             {
                 logger.Error("加载设置失败，已使用默认设置。", ex);
                 settings = new AppSettings();
-                MessageBox.Show(
+                System.Windows.MessageBox.Show(
                     $"设置文件无法使用，程序已恢复默认设置。\n\n{ex.Message}\n\n原文件仍保留在：{AppPaths.SettingsFile}",
                     "设置恢复",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
             }
 
-            var coordinator = new QuotaCoordinator(
+            coordinator = new QuotaCoordinator(
                 settings,
                 new JsonFileStore<AppState>(AppPaths.StateFile),
                 logger);
             var startHidden = args.Any(arg => arg.Equals("--background", StringComparison.OrdinalIgnoreCase));
-            mainForm = new MainForm(settings, settingsStore, coordinator, logger, startHidden);
-            singleInstance.StartListening(() =>
-            {
-                if (mainForm.IsHandleCreated)
-                    mainForm.BeginInvoke(mainForm.RestoreFromTray);
-            });
-            Application.Run(mainForm);
-            mainForm.FinishAsync().GetAwaiter().GetResult();
-            coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            mainWindow = new MainWindow(settings, settingsStore, coordinator, logger, startHidden);
+            application.MainWindow = mainWindow;
+            singleInstance.StartListening(() => mainWindow.Dispatcher.BeginInvoke(mainWindow.RestoreFromTray));
+            mainWindow.Show();
+            application.Run();
+            mainWindow.FinishAsync().GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {
-            ErrorReporter.Show(mainForm, "启动失败", ex, logger);
+            ErrorReporter.Show(mainWindow, "启动失败", ex, logger);
+        }
+        finally
+        {
+            if (coordinator is not null)
+                coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 }
