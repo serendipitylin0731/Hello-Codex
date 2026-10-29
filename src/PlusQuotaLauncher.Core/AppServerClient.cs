@@ -211,7 +211,7 @@ public sealed class AppServerClient : IAsyncDisposable
             {
                 await CallCoreAsync(
                     "initialize",
-                    new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.4.1" } },
+                    new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.4.2" } },
                     TimeSpan.FromSeconds(25),
                     cancellationToken);
                 await WriteAsync(JsonSerializer.Serialize(new { method = "initialized", @params = new { } }), cancellationToken);
@@ -339,37 +339,58 @@ public sealed class AppServerClient : IAsyncDisposable
         var names = Path.HasExtension(expanded)
             ? new[] { expanded }
             : new[] { expanded + ".exe", expanded + ".cmd", expanded + ".bat", expanded };
-        foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator))
+        string? FindInPath(string? pathValue)
         {
-            var path = Environment.ExpandEnvironmentVariables(directory.Trim().Trim('"'));
-            if (string.IsNullOrWhiteSpace(path))
-                continue;
-            foreach (var name in names)
+            foreach (var directory in (pathValue ?? string.Empty).Split(Path.PathSeparator))
             {
-                var candidate = Path.Combine(path, name);
-                if (File.Exists(candidate))
-                    return Path.GetFullPath(candidate);
+                var path = Environment.ExpandEnvironmentVariables(directory.Trim().Trim('"'));
+                if (string.IsNullOrWhiteSpace(path))
+                    continue;
+                foreach (var name in names)
+                {
+                    var candidate = Path.Combine(path, name);
+                    if (File.Exists(candidate))
+                        return Path.GetFullPath(candidate);
+                }
             }
+            return null;
         }
 
-        // A program started by Explorer can retain an old PATH after Codex is installed.
+        var processPath = FindInPath(Environment.GetEnvironmentVariable("PATH"));
+        if (processPath is not null)
+            return processPath;
+
+        // Installer and Explorer processes can retain an old or incomplete environment.
         if (expanded.Equals("codex", StringComparison.OrdinalIgnoreCase))
         {
-            var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
-            if (!string.IsNullOrWhiteSpace(localAppData))
+            foreach (var localAppData in new[]
+                     {
+                         Environment.GetEnvironmentVariable("LOCALAPPDATA"),
+                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)
+                     }.Where(path => !string.IsNullOrWhiteSpace(path)))
             {
-                var installedApp = Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe");
+                var installedApp = Path.Combine(localAppData!, "Programs", "OpenAI", "Codex", "bin", "codex.exe");
                 if (File.Exists(installedApp))
                     return installedApp;
             }
 
-            var appData = Environment.GetEnvironmentVariable("APPDATA");
-            if (!string.IsNullOrWhiteSpace(appData))
+            foreach (var appData in new[]
+                     {
+                         Environment.GetEnvironmentVariable("APPDATA"),
+                         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
+                     }.Where(path => !string.IsNullOrWhiteSpace(path)))
             {
-                var npmCli = Path.Combine(appData, "npm", "codex.cmd");
+                var npmCli = Path.Combine(appData!, "npm", "codex.cmd");
                 if (File.Exists(npmCli))
                     return npmCli;
             }
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            var userPath = FindInPath(Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User));
+            if (userPath is not null)
+                return userPath;
         }
 
         throw new LauncherException(

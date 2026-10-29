@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "2.4.1"
+  #define MyAppVersion "2.4.2"
 #endif
 #ifndef PublishDir
   #define PublishDir "..\artifacts\publish"
@@ -20,6 +20,8 @@ AppPublisherURL=https://github.com/serendipitylin0731/codex-preuse
 AppSupportURL=https://github.com/serendipitylin0731/codex-preuse/issues
 AppUpdatesURL=https://github.com/serendipitylin0731/codex-preuse/releases
 DefaultDirName={localappdata}\Programs\ChatGPTPlusQuotaLauncher
+DisableDirPage=no
+UsePreviousAppDir=yes
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
