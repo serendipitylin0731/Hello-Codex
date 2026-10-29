@@ -20,13 +20,13 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - name: Build desktop app
-        run: dotnet build src/PlusQuotaLauncher/PlusQuotaLauncher.csproj -c Release --nologo
+        run: dotnet build src/HelloCodex/HelloCodex.csproj -c Release --nologo
       - name: Run core regression tests
-        run: dotnet run --project tests/PlusQuotaLauncher.Core.Tests/PlusQuotaLauncher.Core.Tests.csproj -c Release --nologo
+        run: dotnet run --project tests/HelloCodex.Core.Tests/HelloCodex.Core.Tests.csproj -c Release --nologo
       - name: Publish self-contained Windows x64 app
         shell: pwsh
         run: |
-          dotnet publish src/PlusQuotaLauncher/PlusQuotaLauncher.csproj `
+          dotnet publish src/HelloCodex/HelloCodex.csproj `
             -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true -p:PublishTrimmed=false `
             -o artifacts/publish --nologo
@@ -49,16 +49,16 @@ jobs:
       - name: Build single-file installer
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '2.4.5' }
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '3.0.0' }
           $publish = (Resolve-Path 'artifacts/publish').Path
           $output = Join-Path $PWD 'artifacts/installer'
           New-Item -ItemType Directory -Force -Path $output | Out-Null
-          & $env:INNO_ISCC "/DMyAppVersion=$version" "/DPublishDir=$publish" "/DOutputDir=$output" 'installer/PlusQuotaLauncher.iss'
+          & $env:INNO_ISCC "/DMyAppVersion=$version" "/DPublishDir=$publish" "/DOutputDir=$output" 'installer/HelloCodex.iss'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: ChatGPTPlusQuotaLauncherSetup
-          path: artifacts/installer/ChatGPTPlusQuotaLauncherSetup.exe
+          name: HelloCodexSetup
+          path: artifacts/installer/HelloCodexSetup.exe
           if-no-files-found: error
 
   release:
@@ -71,8 +71,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v5
         with:
-          name: ChatGPTPlusQuotaLauncherSetup
+          name: HelloCodexSetup
       - name: Create release with installer
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" ChatGPTPlusQuotaLauncherSetup.exe --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag
+        run: gh release create "${GITHUB_REF_NAME}" HelloCodexSetup.exe --repo "${GITHUB_REPOSITORY}" --generate-notes --verify-tag

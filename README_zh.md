@@ -1,6 +1,6 @@
-# ChatGPT Plus 额度启动器
+# Hello! Codex
 
-<p align="center"><img src="assets/logo.png" width="128" alt="ChatGPT Plus 额度启动器 Logo"></p>
+<p align="center"><img src="assets/logo.png" width="128" alt="Hello! Codex Logo"></p>
 
 这是一个为 **ChatGPT Plus 订阅用户**设计的 Windows Codex 额度启动器。程序通过本机 Codex App Server 读取账户返回的五小时额度窗口，在满足你设置的时区、每日启用时间与重置条件时，创建新的 Codex 会话并发送指定内容。
 
@@ -25,7 +25,7 @@
 
 ## 安装
 
-1. 从 [GitHub Releases](https://github.com/serendipitylin0731/codex-preuse/releases) 下载 `ChatGPTPlusQuotaLauncherSetup.exe`。
+1. 从 [GitHub Releases](https://github.com/serendipitylin0731/Hello-Codex/releases) 下载 `HelloCodexSetup.exe`。
 2. 运行安装程序。默认安装到当前用户目录，不要求管理员权限。
 3. 安装官方 Codex CLI，并使用 ChatGPT 账户登录：
 
@@ -35,7 +35,7 @@
    codex --version
    ```
 
-4. 打开“ChatGPT Plus 额度启动器”，设置时区和启用时间。
+4. 打开“Hello! Codex”，设置时区和启用时间。
 5. 点击“立即检查”，确认界面显示 ChatGPT 登录以及 300 分钟额度窗口。
 6. 保存设置并启动监控。
 
@@ -83,8 +83,10 @@
 程序数据保存在：
 
 ```text
-%LOCALAPPDATA%\ChatGPTPlusQuotaLauncher\
+%LOCALAPPDATA%\Hello! Codex\
 ```
+
+从旧版升级时，首次启动会复制原有的设置和自动发送去重状态；原目录留作备份。旧版开机启动项也会自动指向新版程序。
 
 其中：
 
@@ -121,9 +123,9 @@
 需要 Windows 和 .NET 8 SDK：
 
 ```powershell
-dotnet build src/PlusQuotaLauncher/PlusQuotaLauncher.csproj -c Release
-dotnet run --project tests/PlusQuotaLauncher.Core.Tests/PlusQuotaLauncher.Core.Tests.csproj -c Release
-dotnet publish src/PlusQuotaLauncher/PlusQuotaLauncher.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish
+dotnet build src/HelloCodex/HelloCodex.csproj -c Release
+dotnet run --project tests/HelloCodex.Core.Tests/HelloCodex.Core.Tests.csproj -c Release
+dotnet publish src/HelloCodex/HelloCodex.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish
 ```
 
 GitHub Actions 会运行回归测试、生成自包含 Windows x64 应用，并通过经过签名验证的 Inno Setup 7 生成一个安装程序 EXE。Release 只发布安装包，不再发布整个 ZIP。

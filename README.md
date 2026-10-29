@@ -1,8 +1,8 @@
-# ChatGPT Plus 额度启动器
+# Hello! Codex
 
-[![CI](https://github.com/serendipitylin0731/codex-preuse/actions/workflows/ci.yml/badge.svg)](https://github.com/serendipitylin0731/codex-preuse/actions/workflows/ci.yml)
+[![CI](https://github.com/serendipitylin0731/Hello-Codex/actions/workflows/ci.yml/badge.svg)](https://github.com/serendipitylin0731/Hello-Codex/actions/workflows/ci.yml)
 
-<p align="center"><img src="assets/logo.png" width="128" alt="ChatGPT Plus 额度启动器 Logo"></p>
+<p align="center"><img src="assets/logo.png" width="128" alt="Hello! Codex Logo"></p>
 
 这是一个为 **ChatGPT Plus 订阅用户**设计的 Windows Codex 额度启动器。程序通过本机 Codex App Server 读取五小时额度窗口，并按你设置的时区、每日启用时间和额度重置条件启动任务。
 
@@ -27,7 +27,7 @@
 
 ## 安装
 
-1. 从 [GitHub Releases](https://github.com/serendipitylin0731/codex-preuse/releases/latest) 下载 `ChatGPTPlusQuotaLauncherSetup.exe`。
+1. 从 [GitHub Releases](https://github.com/serendipitylin0731/Hello-Codex/releases/latest) 下载 `HelloCodexSetup.exe`。
 2. 运行安装程序，在安装向导中选择安装位置。默认安装到当前用户目录；升级时默认沿用原安装位置，仍可修改。不需要管理员权限。安装完成后可勾选“启动程序”；程序会自动重新启动一次，随后显示主界面。日常启动不会重复重启。
 3. 安装官方 Codex CLI，并登录 ChatGPT Plus 账户：
 
@@ -81,8 +81,10 @@
 设置、状态与日志保存在：
 
 ```text
-%LOCALAPPDATA%\ChatGPTPlusQuotaLauncher\
+%LOCALAPPDATA%\Hello! Codex\
 ```
+
+从旧版升级时，首次启动会复制原有的设置和自动发送去重状态；原目录留作备份。旧版开机启动项也会自动指向新版程序。
 
 其中包含：
 
@@ -96,9 +98,9 @@
 需要 Windows 和 .NET 8 SDK：
 
 ```powershell
-dotnet build src/PlusQuotaLauncher/PlusQuotaLauncher.csproj -c Release
-dotnet run --project tests/PlusQuotaLauncher.Core.Tests/PlusQuotaLauncher.Core.Tests.csproj -c Release
-dotnet publish src/PlusQuotaLauncher/PlusQuotaLauncher.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish
+dotnet build src/HelloCodex/HelloCodex.csproj -c Release
+dotnet run --project tests/HelloCodex.Core.Tests/HelloCodex.Core.Tests.csproj -c Release
+dotnet publish src/HelloCodex/HelloCodex.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish
 ```
 
 GitHub Actions 会运行回归测试、生成自包含 Windows x64 应用，并使用经过签名验证的 Inno Setup 生成单个安装程序。Release 只发布安装包，不发布项目 ZIP。
