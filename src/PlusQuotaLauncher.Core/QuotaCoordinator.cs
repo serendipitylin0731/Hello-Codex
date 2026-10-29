@@ -41,8 +41,8 @@ public sealed class QuotaCoordinator : IAsyncDisposable
 
     public async Task<CoordinatorStatus> CheckAsync(bool automatic, CancellationToken cancellationToken)
     {
-        if (automatic && SchedulePolicy.IsDisabled(DateTimeOffset.UtcNow, _settings))
-            return new CoordinatorStatus(CoordinatorState.Disabled, "当前处于禁用时段，未查询额度。");
+        if (automatic && !SchedulePolicy.IsEnabled(DateTimeOffset.UtcNow, _settings))
+            return new CoordinatorStatus(CoordinatorState.Disabled, "当前不在启用时间，未查询额度。");
 
         await _operationGate.WaitAsync(cancellationToken);
         try

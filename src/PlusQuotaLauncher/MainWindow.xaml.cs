@@ -1,5 +1,4 @@
 using PlusQuotaLauncher.Core;
-using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -7,6 +6,8 @@ using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
+using WpfButton = System.Windows.Controls.Button;
 using DrawingIcon = System.Drawing.Icon;
 using Forms = System.Windows.Forms;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
@@ -18,11 +19,9 @@ public partial class MainWindow : Window
 {
     private sealed record TimeZoneChoice(string Id, string Display);
     private sealed record ThemeChoice(string Id, string Display);
-    private sealed class DisabledRangeEditor
-    {
-        public string Start { get; set; } = "16:00";
-        public string End { get; set; } = "21:00";
-    }
+    private static readonly DayOfWeek[] Weekdays =
+        [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday,
+         DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
 
     private readonly JsonFileStore<AppSettings> _settingsStore;
     private readonly QuotaCoordinator _coordinator;
@@ -30,8 +29,12 @@ public partial class MainWindow : Window
     private readonly bool _startHidden;
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly DrawingIcon _trayDrawingIcon;
-    private readonly ObservableCollection<DisabledRangeEditor> _disabledRangeEditors = [];
+    private readonly Dictionary<DayOfWeek, TimeRangeTimeline> _weekdayTimelines = [];
+    private readonly DispatcherTimer _todayTimer = new() { Interval = TimeSpan.FromMinutes(1) };
     private AppSettings _settings;
+    private DayOfWeek _selectedWeekday;
+    private bool _customizeByWeekday;
+    private bool _weekdayEditorsInitialized;
     private CancellationTokenSource? _monitorCancellation;
     private Task? _monitorTask;
     private bool _allowExit;
@@ -55,7 +58,9 @@ public partial class MainWindow : Window
         _startHidden = startHidden;
 
         InitializeComponent();
-        DisabledRangesItems.ItemsSource = _disabledRangeEditors;
+        foreach (var day in Weekdays)
+            _weekdayTimelines[day] = new TimeRangeTimeline();
+        _todayTimer.Tick += (_, _) => UpdateTodayTimeline();
         LoadSettingsIntoUi();
 
         var trayMenu = new Forms.ContextMenuStrip();
@@ -80,30 +85,36 @@ public partial class MainWindow : Window
         Closed += OnClosed;
         StateChanged += (_, _) => MaximizeGlyph.Text = WindowState == WindowState.Maximized ? "❐" : "□";
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        Microsoft.Win32.SystemEvents.TimeChanged += OnSystemTimeChanged;
     }
 
     private void LoadSettingsIntoUi()
     {
         _loadingSettings = true;
-        var zones = TimeZoneInfo.GetSystemTimeZones()
-            .Select(zone => new TimeZoneChoice(zone.Id, $"{zone.DisplayName}  [{zone.Id}]"))
-            .ToList();
+        var zones = new List<TimeZoneChoice>
+        {
+            new("system", $"跟随系统 · {TimeZoneInfo.Local.DisplayName}")
+        };
+        zones.AddRange(TimeZoneInfo.GetSystemTimeZones()
+            .Select(zone => new TimeZoneChoice(zone.Id, $"{zone.DisplayName}  [{zone.Id}]")));
         TimeZoneCombo.ItemsSource = zones;
         TimeZoneCombo.DisplayMemberPath = nameof(TimeZoneChoice.Display);
         TimeZoneCombo.SelectedValuePath = nameof(TimeZoneChoice.Id);
         TimeZoneCombo.SelectedValue = zones.Any(zone => zone.Id == _settings.TimeZoneId)
             ? _settings.TimeZoneId
-            : "UTC";
+            : "system";
 
-        _disabledRangeEditors.Clear();
-        foreach (var range in _settings.GetDisabledRanges())
+        DailyTimeline.SetRanges(_settings.EnabledRanges ?? _settings.GetEnabledRanges(DayOfWeek.Monday));
+        foreach (var day in Weekdays)
         {
-            _disabledRangeEditors.Add(new DisabledRangeEditor
-            {
-                Start = range.Start.ToString("HH:mm", CultureInfo.InvariantCulture),
-                End = range.End.ToString("HH:mm", CultureInfo.InvariantCulture)
-            });
+            _weekdayTimelines[day].SetRanges(_settings.GetEnabledRanges(day));
         }
+        _customizeByWeekday = _settings.CustomizeByWeekday;
+        _weekdayEditorsInitialized = _customizeByWeekday;
+        _selectedWeekday = SchedulePolicy.InSelectedTimeZone(DateTimeOffset.UtcNow, _settings).DayOfWeek;
+        UpdateScheduleMode();
+        SelectWeekday(_selectedWeekday);
+        UpdateTodayTimeline();
 
         ModelBox.Text = _settings.Model;
         EffortCombo.ItemsSource = new[] { "none", "low", "medium", "high", "xhigh", "max" };
@@ -132,17 +143,22 @@ public partial class MainWindow : Window
         var zoneId = TimeZoneCombo.SelectedValue as string;
         if (string.IsNullOrWhiteSpace(zoneId))
             throw new LauncherException("请选择时区。", "从时区列表中选择一个项目。");
-        var disabledRanges = new List<DisabledTimeRange>();
-        for (var index = 0; index < _disabledRangeEditors.Count; index++)
+        var dailyRanges = DailyTimeline.GetRanges();
+        List<DayEnabledSchedule>? weeklyRanges = null;
+        if (_customizeByWeekday)
         {
-            var editor = _disabledRangeEditors[index];
-            if (!TryParseTime(editor.Start, out var start) || !TryParseTime(editor.End, out var end))
+            weeklyRanges = [];
+            foreach (var day in Weekdays)
             {
-                throw new LauncherException(
-                    $"第 {index + 1} 个免打扰时间段格式无效。",
-                    "请输入 HH:mm，例如 22:00 或 06:30。");
+                try
+                {
+                    weeklyRanges.Add(new DayEnabledSchedule(day, _weekdayTimelines[day].GetRanges()));
+                }
+                catch (LauncherException ex)
+                {
+                    throw new LauncherException($"{DayLabel(day)}：{ex.UserMessage}", ex.Suggestion, ex);
+                }
             }
-            disabledRanges.Add(new DisabledTimeRange(start, end));
         }
         if (!int.TryParse(PollSecondsBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var pollSeconds))
             throw new LauncherException("检查间隔必须是整数。", "请输入 30 到 86400 之间的秒数。");
@@ -159,23 +175,15 @@ public partial class MainWindow : Window
             WindowMinutes = _settings.WindowMinutes,
             TriggerThresholdSeconds = _settings.TriggerThresholdSeconds,
             TimeZoneId = zoneId,
-            DisabledStart = disabledRanges.FirstOrDefault()?.Start ?? _settings.DisabledStart,
-            DisabledEnd = disabledRanges.FirstOrDefault()?.End ?? _settings.DisabledEnd,
-            DisabledRanges = disabledRanges,
+            EnabledRanges = dailyRanges,
+            CustomizeByWeekday = _customizeByWeekday,
+            WeeklyEnabledRanges = weeklyRanges,
             StartMonitoringOnLaunch = MonitorOnLaunchBox.IsChecked == true,
             UiTheme = ThemeCombo.SelectedValue as string ?? "system"
         };
-        updated.Validate();
+        updated.NormalizeSchedules();
         return updated;
     }
-
-    private static bool TryParseTime(string value, out TimeOnly result) =>
-        TimeOnly.TryParseExact(
-            value.Trim(),
-            new[] { "H:mm", "HH:mm" },
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.None,
-            out result);
 
     private async Task<bool> SaveSettingsAsync(bool showSuccess)
     {
@@ -188,6 +196,16 @@ public partial class MainWindow : Window
             AutoStartManager.SetEnabled(AutoStartBox.IsChecked == true);
             _settings = updated;
             _logger.SetTimeZone(updated.SelectedTimeZone);
+            if (_customizeByWeekday)
+            {
+                foreach (var day in updated.WeeklyEnabledRanges!)
+                    _weekdayTimelines[day.Day].SetRanges(day.Ranges);
+            }
+            else
+            {
+                DailyTimeline.SetRanges(updated.EnabledRanges!);
+            }
+            UpdateTodayTimeline();
             _logger.Info("设置已保存。");
             if (showSuccess)
             {
@@ -314,7 +332,7 @@ public partial class MainWindow : Window
                 return;
             var confirmation = WpfMessageBox.Show(
                 this,
-                $"将立即创建新的 Codex 会话并发送：\n\n{_settings.Message}\n\n本操作会忽略免打扰时段和额度阈值，并消耗 ChatGPT Plus/Codex 使用额度。是否继续？",
+                $"将立即创建新的 Codex 会话并发送：\n\n{_settings.Message}\n\n本操作会忽略启用时间和额度阈值，并消耗 ChatGPT Plus/Codex 使用额度。是否继续？",
                 "确认手动发送",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning,
@@ -342,19 +360,16 @@ public partial class MainWindow : Window
     {
         var visual = status.State switch
         {
-            CoordinatorState.Checking => ("检查中", "#E8F2FF", "#1559B7"),
-            CoordinatorState.Disabled => ("免打扰", "#F1ECFF", "#6941C6"),
-            CoordinatorState.Waiting => ("监控中", "#E8F8F0", "#087A50"),
-            CoordinatorState.Sending => ("发送中", "#FFF2D7", "#9A5B00"),
-            CoordinatorState.Sent => ("已发送", "#E2F7EA", "#087A3E"),
-            CoordinatorState.Error => ("发生错误", "#FDEBEC", "#B4232A"),
-            _ => ("未启动", "#EEF1F5", "#526073")
+            CoordinatorState.Checking => ("检查中", "#70B7FF"),
+            CoordinatorState.Disabled => ("未到启用时间", "#A78BFA"),
+            CoordinatorState.Waiting => ("监控中", "#12A66A"),
+            CoordinatorState.Sending => ("发送中", "#F5B942"),
+            CoordinatorState.Sent => ("已发送", "#12A66A"),
+            CoordinatorState.Error => ("发生错误", "#B4232A"),
+            _ => ("未启动", "#8CA0B8")
         };
-        StateBadgeText.Text = visual.Item1;
-        StateBadgeBorder.Background = BrushFrom(visual.Item2);
-        StateBadgeText.Foreground = BrushFrom(visual.Item3);
         HeaderStatusText.Text = visual.Item1;
-        HeaderStatusDot.Fill = BrushFrom(visual.Item3);
+        HeaderStatusDot.Fill = BrushFrom(visual.Item2);
         SummaryText.Text = status.Summary.TrimEnd('。');
 
         if (status.Snapshot is null)
@@ -539,6 +554,7 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs eventArgs)
     {
+        _todayTimer.Start();
         if (_startHidden)
             HideToTray(false);
         if (_settings.StartMonitoringOnLaunch)
@@ -575,7 +591,9 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs eventArgs)
     {
+        _todayTimer.Stop();
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        Microsoft.Win32.SystemEvents.TimeChanged -= OnSystemTimeChanged;
         _logger.EntryWritten -= OnLogEntry;
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
@@ -652,15 +670,70 @@ public partial class MainWindow : Window
 
     private void BrowseCodexButton_Click(object sender, RoutedEventArgs e) => BrowseCodex();
 
-    private void AddDisabledRangeButton_Click(object sender, RoutedEventArgs e)
+    private static string DayLabel(DayOfWeek day) => day switch
     {
-        _disabledRangeEditors.Add(new DisabledRangeEditor { Start = "22:00", End = "06:00" });
+        DayOfWeek.Monday => "周一",
+        DayOfWeek.Tuesday => "周二",
+        DayOfWeek.Wednesday => "周三",
+        DayOfWeek.Thursday => "周四",
+        DayOfWeek.Friday => "周五",
+        DayOfWeek.Saturday => "周六",
+        _ => "周日"
+    };
+
+    private void UpdateTodayTimeline()
+    {
+        var today = SchedulePolicy.InSelectedTimeZone(DateTimeOffset.UtcNow, _settings).DayOfWeek;
+        var ranges = _settings.GetEnabledRanges(today);
+        TodayTimeline.SetRanges(ranges);
+        TodayScheduleDayText.Text = $"{DayLabel(today)} · {(ranges.Count == 0 ? "未启用" : $"{ranges.Count} 段")}";
     }
 
-    private void RemoveDisabledRangeButton_Click(object sender, RoutedEventArgs e)
+    private void UpdateScheduleMode()
     {
-        if (sender is FrameworkElement { Tag: DisabledRangeEditor editor })
-            _disabledRangeEditors.Remove(editor);
+        DailySchedulePanel.Visibility = _customizeByWeekday ? Visibility.Collapsed : Visibility.Visible;
+        WeeklySchedulePanel.Visibility = _customizeByWeekday ? Visibility.Visible : Visibility.Collapsed;
+        CustomizeWeekButton.Content = _customizeByWeekday ? "每天相同" : "每日定制";
+    }
+
+    private void SelectWeekday(DayOfWeek day)
+    {
+        _selectedWeekday = day;
+        WeeklyEditorHost.Content = _weekdayTimelines[day];
+        foreach (var button in WeekdayTabPanel.Children.OfType<WpfButton>())
+        {
+            if (button.Tag is string value && Enum.TryParse<DayOfWeek>(value, out var buttonDay))
+                button.Style = (Style)FindResource(buttonDay == day ? "ModernButton" : "GhostButton");
+        }
+    }
+
+    private void CustomizeWeekButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_customizeByWeekday && !_weekdayEditorsInitialized)
+        {
+            try
+            {
+                var commonRanges = DailyTimeline.GetRanges();
+                foreach (var day in Weekdays)
+                    _weekdayTimelines[day].SetRanges(commonRanges);
+                _weekdayEditorsInitialized = true;
+            }
+            catch (Exception ex)
+            {
+                ErrorReporter.Show(this, "启用时间无效", ex, _logger);
+                return;
+            }
+        }
+        _customizeByWeekday = !_customizeByWeekday;
+        UpdateScheduleMode();
+        if (_customizeByWeekday)
+            SelectWeekday(_selectedWeekday);
+    }
+
+    private void WeekdayButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is WpfButton { Tag: string value } && Enum.TryParse<DayOfWeek>(value, out var day))
+            SelectWeekday(day);
     }
 
     private void OpenLogButton_Click(object sender, RoutedEventArgs e) => OpenLog();
@@ -678,7 +751,19 @@ public partial class MainWindow : Window
         {
             if ((ThemeCombo.SelectedValue as string ?? _settings.UiTheme) == "system")
                 ApplyTheme("system");
+            RefreshSystemTimeZone();
         });
+    }
+
+    private void OnSystemTimeChanged(object? sender, EventArgs e) => SafeUi(RefreshSystemTimeZone);
+
+    private void RefreshSystemTimeZone()
+    {
+        if (_settings.TimeZoneId != "system")
+            return;
+        TimeZoneInfo.ClearCachedData();
+        _logger.SetTimeZone(_settings.SelectedTimeZone);
+        UpdateTodayTimeline();
     }
 
     private void TitleBarDrag_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

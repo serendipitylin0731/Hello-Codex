@@ -1,0 +1,75 @@
+<UserControl x:Class="PlusQuotaLauncher.TimeRangeTimeline"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             FontFamily="Microsoft YaHei UI" FontSize="13">
+    <UserControl.Resources>
+        <Style x:Key="TimelineHandleStyle" TargetType="Thumb">
+            <Setter Property="Width" Value="14" />
+            <Setter Property="Height" Value="27" />
+            <Setter Property="Cursor" Value="SizeWE" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="#1769E0" BorderBrush="#DCEBFF" BorderThickness="2"
+                                CornerRadius="7" Width="14" Height="27" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel>
+        <TextBlock x:Name="EditHint" Text="拖动蓝色端点，或输入精确时间" Foreground="{DynamicResource MutedBrush}"
+                   FontSize="11" Margin="0,0,0,8" />
+        <Grid Height="34" Margin="7,0,7,0">
+            <Border Height="12" Background="{DynamicResource ProgressTrackBrush}"
+                    CornerRadius="6" VerticalAlignment="Center" />
+            <Canvas x:Name="TrackCanvas" Background="Transparent"
+                    SizeChanged="TrackCanvas_SizeChanged" MouseLeftButtonDown="TrackCanvas_MouseLeftButtonDown" />
+        </Grid>
+        <Grid Margin="4,2,4,11">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="00" FontSize="10" Foreground="{DynamicResource MutedBrush}" />
+            <TextBlock Grid.Column="1" Text="06" FontSize="10" Foreground="{DynamicResource MutedBrush}" />
+            <TextBlock Grid.Column="2" Text="12" FontSize="10" Foreground="{DynamicResource MutedBrush}" />
+            <TextBlock Grid.Column="3" Text="18" FontSize="10" Foreground="{DynamicResource MutedBrush}" />
+            <TextBlock Grid.Column="3" Text="24" HorizontalAlignment="Right" FontSize="10" Foreground="{DynamicResource MutedBrush}" />
+        </Grid>
+
+        <ItemsControl x:Name="RangeRows">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Background="{DynamicResource SoftBackgroundBrush}" CornerRadius="10"
+                            Padding="8" Margin="0,0,0,6">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="32" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding StartText, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="{Binding}" TextAlignment="Center" TextChanged="RangeTextChanged"
+                                     ToolTip="开始时间，格式 HH:mm" />
+                            <TextBlock Grid.Column="1" Text="至" Foreground="{DynamicResource MutedBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="2" Text="{Binding EndText, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="{Binding}" TextAlignment="Center" TextChanged="RangeTextChanged"
+                                     ToolTip="结束时间，支持 24:00" />
+                            <Button Grid.Column="3" Content="移除" Style="{DynamicResource GhostButton}"
+                                    Foreground="{DynamicResource MutedBrush}" Padding="11,7" MinHeight="0"
+                                    Margin="8,0,0,0" Tag="{Binding}" Click="RemoveRange_Click" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Button x:Name="AddRangeButton" Content="＋ 添加区间" Style="{DynamicResource SecondaryButton}" HorizontalAlignment="Left"
+                Padding="12,6" MinHeight="0" Margin="0,6,0,0" Click="AddRange_Click" />
+    </StackPanel>
+</UserControl>

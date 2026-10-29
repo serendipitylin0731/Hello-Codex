@@ -14,7 +14,7 @@ public sealed class AppLogger
     {
         _path = path;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        RotateIfNeeded();
+        File.WriteAllText(_path, string.Empty, new UTF8Encoding(false));
     }
 
     public event Action<LogEntry>? EntryWritten;
@@ -50,12 +50,4 @@ public sealed class AppLogger
         EntryWritten?.Invoke(entry);
     }
 
-    private void RotateIfNeeded()
-    {
-        var file = new FileInfo(_path);
-        if (!file.Exists || file.Length <= 5 * 1024 * 1024)
-            return;
-        var old = _path + ".old";
-        File.Move(_path, old, true);
-    }
 }

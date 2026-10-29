@@ -2,21 +2,19 @@ namespace PlusQuotaLauncher.Core;
 
 public static class SchedulePolicy
 {
-    public static bool IsDisabled(DateTimeOffset utcNow, AppSettings settings)
+    public static bool IsEnabled(DateTimeOffset utcNow, AppSettings settings)
     {
         var local = TimeZoneInfo.ConvertTime(utcNow, settings.SelectedTimeZone);
-        var current = TimeOnly.FromDateTime(local.DateTime);
-        return settings.GetDisabledRanges().Any(range => IsInRange(current, range));
+        var minute = local.Hour * 60 + local.Minute;
+        return settings.GetEnabledRanges(local.DayOfWeek)
+            .Any(range => minute >= range.StartMinute && minute < range.EndMinute);
     }
 
-    private static bool IsInRange(TimeOnly current, DisabledTimeRange range) =>
-        range.Start < range.End
-            ? current >= range.Start && current < range.End
-            : current >= range.Start || current < range.End;
+    public static bool IsDisabled(DateTimeOffset utcNow, AppSettings settings) => !IsEnabled(utcNow, settings);
 
     public static bool ShouldAutoSend(DateTimeOffset utcNow, QuotaWindow window, AppSettings settings)
     {
-        if (IsDisabled(utcNow, settings))
+        if (!IsEnabled(utcNow, settings))
             return false;
         return window.ResetUtc - utcNow > TimeSpan.FromSeconds(settings.TriggerThresholdSeconds);
     }

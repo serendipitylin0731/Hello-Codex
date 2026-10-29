@@ -57,6 +57,64 @@ var rangeRoundTrip = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Seri
 }))!;
 Check(rangeRoundTrip.GetDisabledRanges() is [{ Start: var roundTripStart }] && roundTripStart == new TimeOnly(9, 0),
     "multiple disabled ranges serialize");
+settings.DisabledRanges =
+[
+    new DisabledTimeRange(new TimeOnly(8, 0), new TimeOnly(9, 30)),
+    new DisabledTimeRange(new TimeOnly(12, 0), new TimeOnly(13, 0)),
+    new DisabledTimeRange(new TimeOnly(22, 0), new TimeOnly(6, 0))
+];
+Check(settings.GetEnabledRanges(DayOfWeek.Monday) is [{ StartMinute: 360, EndMinute: 480 },
+    { StartMinute: 570, EndMinute: 720 }, { StartMinute: 780, EndMinute: 1320 }],
+    "legacy disabled ranges become enabled complement");
+
+settings.EnabledRanges =
+[
+    new EnabledTimeRange(720, 900),
+    new EnabledTimeRange(540, 750),
+    new EnabledTimeRange(900, 960)
+];
+settings.NormalizeSchedules();
+Check(settings.EnabledRanges is [{ StartMinute: 540, EndMinute: 960 }],
+    "overlapping and adjacent enabled ranges merge on save");
+Check(SchedulePolicy.IsEnabled(new DateTimeOffset(2026, 10, 26, 9, 0, 0, TimeSpan.Zero), settings),
+    "enabled start inclusive");
+Check(!SchedulePolicy.IsEnabled(new DateTimeOffset(2026, 10, 26, 16, 0, 0, TimeSpan.Zero), settings),
+    "enabled end exclusive");
+settings.EnabledRanges = [new EnabledTimeRange(0, 1440)];
+Check(SchedulePolicy.IsEnabled(new DateTimeOffset(2026, 10, 26, 23, 59, 0, TimeSpan.Zero), settings),
+    "full day enabled through final minute");
+settings.EnabledRanges = [];
+Check(!SchedulePolicy.IsEnabled(new DateTimeOffset(2026, 10, 26, 12, 0, 0, TimeSpan.Zero), settings),
+    "empty enabled day skips automatic checks");
+settings.EnabledRanges = [new EnabledTimeRange(540, 960)];
+settings.WeeklyEnabledRanges = Enum.GetValues<DayOfWeek>()
+    .Select(day => new DayEnabledSchedule(day, []))
+    .ToList();
+settings.WeeklyEnabledRanges.Single(day => day.Day == DayOfWeek.Monday).Ranges =
+    [new EnabledTimeRange(540, 720), new EnabledTimeRange(660, 780)];
+settings.WeeklyEnabledRanges.Single(day => day.Day == DayOfWeek.Tuesday).Ranges =
+    [new EnabledTimeRange(720, 780)];
+settings.CustomizeByWeekday = true;
+settings.NormalizeSchedules();
+Check(settings.GetEnabledRanges(DayOfWeek.Monday) is [{ StartMinute: 540, EndMinute: 780 }],
+    "weekly Monday ranges merge");
+Check(SchedulePolicy.IsEnabled(new DateTimeOffset(2026, 10, 26, 10, 0, 0, TimeSpan.Zero), settings) &&
+      !SchedulePolicy.IsEnabled(new DateTimeOffset(2026, 10, 27, 10, 0, 0, TimeSpan.Zero), settings) &&
+      SchedulePolicy.IsEnabled(new DateTimeOffset(2026, 10, 27, 12, 0, 0, TimeSpan.Zero), settings),
+    "Monday and Tuesday use independent enabled ranges");
+settings.TimeZoneId = "China Standard Time";
+settings.WeeklyEnabledRanges.Single(day => day.Day == DayOfWeek.Monday).Ranges =
+    [new EnabledTimeRange(0, 120)];
+Check(SchedulePolicy.IsEnabled(new DateTimeOffset(2026, 10, 25, 17, 0, 0, TimeSpan.Zero), settings),
+    "weekly day boundary follows chosen timezone");
+var savedWeeklySettings = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings))!;
+Check(savedWeeklySettings.CustomizeByWeekday &&
+      savedWeeklySettings.GetEnabledRanges(DayOfWeek.Monday) is [{ StartMinute: 0, EndMinute: 120 }] &&
+      savedWeeklySettings.GetEnabledRanges(DayOfWeek.Sunday).Count == 0,
+    "weekly schedules survive settings round trip");
+settings.TimeZoneId = "UTC";
+settings.CustomizeByWeekday = false;
+settings.EnabledRanges = [new EnabledTimeRange(0, 1440)];
 
 var now = new DateTimeOffset(2026, 10, 29, 10, 0, 0, TimeSpan.Zero);
 var exact = new QuotaWindow("codex", "primary", 0, 300, now.AddSeconds(settings.TriggerThresholdSeconds).ToUnixTimeSeconds());
@@ -85,6 +143,9 @@ Check(ProtocolValues.TurnReadOnlySandboxPolicy == "readOnly", "turn sandbox poli
 settings.Validate();
 Check(true, "default settings validate");
 Check(settings.UiTheme == "system", "default theme follows system");
+Check(new AppSettings().TimeZoneId == "system" &&
+      new AppSettings().SelectedTimeZone.Id == TimeZoneInfo.Local.Id,
+    "new settings follow system timezone");
 var invalidTheme = new AppSettings { UiTheme = "neon" };
 try
 {
@@ -103,7 +164,9 @@ if (OperatingSystem.IsWindows())
     try
     {
         var logPath = Path.Combine(fixtureDirectory, "launcher.log");
+        File.WriteAllText(logPath, "old session log");
         var logger = new AppLogger(logPath);
+        Check(new FileInfo(logPath).Length == 0, "startup clears previous log");
         var china = TimeZoneInfo.FindSystemTimeZoneById("China Standard Time");
         logger.SetTimeZone(china);
         var before = DateTimeOffset.UtcNow;
