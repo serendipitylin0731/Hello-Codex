@@ -182,6 +182,42 @@ if (OperatingSystem.IsWindows())
         logger.Info("utc probe");
         Check(File.ReadLines(logPath).Last().Contains("+00:00 UTC]"), "log timezone changes without rewriting history");
 
+        var oldPath = Environment.GetEnvironmentVariable("PATH");
+        var oldLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        try
+        {
+            var pathDirectory = Path.Combine(fixtureDirectory, "path");
+            Directory.CreateDirectory(pathDirectory);
+            var pathCodex = Path.Combine(pathDirectory, "codex.exe");
+            File.WriteAllText(pathCodex, "test executable marker");
+            var localAppData = Path.Combine(fixtureDirectory, "local");
+            var installedCodex = Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe");
+            Directory.CreateDirectory(Path.GetDirectoryName(installedCodex)!);
+            File.WriteAllText(installedCodex, "test executable marker");
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", localAppData);
+
+            Environment.SetEnvironmentVariable("PATH", pathDirectory);
+            Check(AppServerClient.ResolveCodexPath("codex") == pathCodex,
+                "Codex CLI resolves from PATH first");
+            Environment.SetEnvironmentVariable("PATH", fixtureDirectory);
+            Check(AppServerClient.ResolveCodexPath("codex") == installedCodex,
+                "Codex CLI resolves from user installation with stale PATH");
+            try
+            {
+                AppServerClient.ResolveCodexPath(Path.Combine(fixtureDirectory, "missing-codex.exe"));
+                Check(false, "explicit missing Codex path is rejected");
+            }
+            catch (LauncherException)
+            {
+                Check(true, "explicit missing Codex path is rejected");
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", oldPath);
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", oldLocalAppData);
+        }
+
         var testExecutable = Environment.ProcessPath!;
         foreach (var mode in new[] { "malformed", "reader-ended" })
         {

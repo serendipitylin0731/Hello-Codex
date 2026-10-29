@@ -182,7 +182,7 @@ public sealed class AppServerClient : IAsyncDisposable
             if (IsRunning)
                 return;
             await StopProcessAsync();
-            var resolved = await ResolveCodexPathAsync(_codexPath, cancellationToken);
+            var resolved = ResolveCodexPath(_codexPath);
             var startInfo = BuildStartInfo(resolved);
             _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             _process.ErrorDataReceived += (_, args) =>
@@ -211,7 +211,7 @@ public sealed class AppServerClient : IAsyncDisposable
             {
                 await CallCoreAsync(
                     "initialize",
-                    new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.4.0" } },
+                    new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.4.1" } },
                     TimeSpan.FromSeconds(25),
                     cancellationToken);
                 await WriteAsync(JsonSerializer.Serialize(new { method = "initialized", @params = new { } }), cancellationToken);
@@ -327,31 +327,54 @@ public sealed class AppServerClient : IAsyncDisposable
         }
     }
 
-    private static async Task<string> ResolveCodexPathAsync(string configuredPath, CancellationToken cancellationToken)
+    internal static string ResolveCodexPath(string configuredPath)
     {
         var expanded = Environment.ExpandEnvironmentVariables(configuredPath.Trim().Trim('"'));
         if (File.Exists(expanded))
             return Path.GetFullPath(expanded);
-        if (Path.IsPathRooted(expanded) || expanded.Contains(Path.DirectorySeparatorChar))
+        if (Path.IsPathRooted(expanded) || expanded.Contains(Path.DirectorySeparatorChar) ||
+            expanded.Contains(Path.AltDirectorySeparatorChar))
             throw new LauncherException($"找不到 Codex CLI：{expanded}", "在设置中选择有效的 codex.exe 或 codex.cmd。");
 
-        var info = new ProcessStartInfo("where.exe")
+        var names = Path.HasExtension(expanded)
+            ? new[] { expanded }
+            : new[] { expanded + ".exe", expanded + ".cmd", expanded + ".bat", expanded };
+        foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator))
         {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        info.ArgumentList.Add(expanded);
-        using var process = Process.Start(info);
-        if (process is null)
-            throw new LauncherException("无法搜索 Codex CLI。", "确认 Windows 的 where.exe 可用，或填写 Codex CLI 完整路径。");
-        var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var first = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(File.Exists);
-        if (process.ExitCode != 0 || first is null)
-            throw new LauncherException("未在 PATH 中找到 Codex CLI。", "安装官方 Codex CLI 并执行 codex login，或在设置中填写完整路径。");
-        return first;
+            var path = Environment.ExpandEnvironmentVariables(directory.Trim().Trim('"'));
+            if (string.IsNullOrWhiteSpace(path))
+                continue;
+            foreach (var name in names)
+            {
+                var candidate = Path.Combine(path, name);
+                if (File.Exists(candidate))
+                    return Path.GetFullPath(candidate);
+            }
+        }
+
+        // A program started by Explorer can retain an old PATH after Codex is installed.
+        if (expanded.Equals("codex", StringComparison.OrdinalIgnoreCase))
+        {
+            var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+            if (!string.IsNullOrWhiteSpace(localAppData))
+            {
+                var installedApp = Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe");
+                if (File.Exists(installedApp))
+                    return installedApp;
+            }
+
+            var appData = Environment.GetEnvironmentVariable("APPDATA");
+            if (!string.IsNullOrWhiteSpace(appData))
+            {
+                var npmCli = Path.Combine(appData, "npm", "codex.cmd");
+                if (File.Exists(npmCli))
+                    return npmCli;
+            }
+        }
+
+        throw new LauncherException(
+            "找不到 Codex CLI。",
+            "在高级设置中浏览并选择 codex.exe 或 codex.cmd；安装后也可以重新登录 Windows 再试。");
     }
 
     private static ProcessStartInfo BuildStartInfo(string resolvedPath)
