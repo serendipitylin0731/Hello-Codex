@@ -159,6 +159,21 @@ catch (LauncherException)
 
 if (OperatingSystem.IsWindows())
 {
+    Check(PostInstallRestart.IsRequested([PostInstallRestart.Argument, "1234"]),
+        "installer launch requests one restart");
+    Check(!PostInstallRestart.IsRequested([PostInstallRestart.CompletedArgument]),
+        "restarted process cannot enter restart loop");
+    Check(!PostInstallRestart.IsRequested(["--background"]),
+        "normal background launch does not restart");
+    try
+    {
+        PostInstallRestart.Run([PostInstallRestart.Argument, Environment.ProcessId.ToString()], Environment.ProcessPath!);
+        Check(false, "restart rejects waiting for itself");
+    }
+    catch (LauncherException)
+    {
+        Check(true, "restart rejects waiting for itself");
+    }
     var fixtureDirectory = Path.Combine(Path.GetTempPath(), "plus-quota-transport-" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(fixtureDirectory);
     try

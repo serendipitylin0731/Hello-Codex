@@ -28,7 +28,7 @@
 ## 安装
 
 1. 从 [GitHub Releases](https://github.com/serendipitylin0731/codex-preuse/releases/latest) 下载 `ChatGPTPlusQuotaLauncherSetup.exe`。
-2. 运行安装程序，在安装向导中选择安装位置。默认安装到当前用户目录；升级时默认沿用原安装位置，仍可修改。不需要管理员权限。安装完成后可勾选“启动程序”。
+2. 运行安装程序，在安装向导中选择安装位置。默认安装到当前用户目录；升级时默认沿用原安装位置，仍可修改。不需要管理员权限。安装完成后可勾选“启动程序”；程序会自动重新启动一次，随后显示主界面。日常启动不会重复重启。
 3. 安装官方 Codex CLI，并登录 ChatGPT Plus 账户：
 
    ```powershell

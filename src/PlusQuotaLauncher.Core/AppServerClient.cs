@@ -194,7 +194,7 @@ public sealed class AppServerClient : IAsyncDisposable
             {
                 await CallCoreAsync(
                     "initialize",
-                    new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.4.4" } },
+                    new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.4.5" } },
                     TimeSpan.FromSeconds(25),
                     cancellationToken);
                 await WriteAsync(JsonSerializer.Serialize(new { method = "initialized", @params = new { } }), cancellationToken);

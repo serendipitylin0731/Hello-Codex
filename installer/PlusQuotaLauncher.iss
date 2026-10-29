@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "2.4.4"
+  #define MyAppVersion "2.4.5"
 #endif
 #ifndef PublishDir
   #define PublishDir "..\artifacts\publish"
@@ -63,4 +63,13 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ChatGPTPlusQuotaLauncher"; ValueData: """{app}\{#MyAppExeName}"" --background"; Tasks: startup; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; WorkingDir: "{app}"; Flags: postinstall shellexec runasoriginaluser skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--post-install {code:InstallerProcessId}"; Description: "启动 {#MyAppName}"; WorkingDir: "{app}"; Flags: postinstall nowait runasoriginaluser skipifsilent
+
+[Code]
+function GetCurrentProcessId: Integer;
+  external 'GetCurrentProcessId@kernel32.dll stdcall';
+
+function InstallerProcessId(Param: String): String;
+begin
+  Result := IntToStr(GetCurrentProcessId());
+end;

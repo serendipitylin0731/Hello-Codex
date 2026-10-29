@@ -8,6 +8,21 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (PostInstallRestart.IsRequested(args))
+        {
+            try
+            {
+                PostInstallRestart.Run(args, Environment.ProcessPath ?? throw new InvalidOperationException("无法确定程序路径。"));
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(
+                    $"安装后自动重启失败。请从开始菜单打开程序。\n\n{ex.Message}",
+                    "启动失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            return;
+        }
+
         using var singleInstance = SingleInstance.Acquire();
         if (!singleInstance.IsPrimary)
         {
@@ -58,6 +73,8 @@ internal static class Program
             }
 
             logger.SetTimeZone(settings.SelectedTimeZone);
+            if (args.Contains(PostInstallRestart.CompletedArgument, StringComparer.OrdinalIgnoreCase))
+                logger.Info("安装后已自动重启一次，由资源管理器启动正式进程。");
 
             coordinator = new QuotaCoordinator(
                 settings,
