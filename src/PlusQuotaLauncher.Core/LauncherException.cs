@@ -15,6 +15,14 @@ public class LauncherException : Exception
     public bool OutcomeUncertain { get; }
 }
 
+public sealed class AppServerConnectionException : LauncherException
+{
+    public AppServerConnectionException(string message, string suggestion, Exception? inner = null, bool outcomeUncertain = false)
+        : base(message, suggestion, inner, outcomeUncertain)
+    {
+    }
+}
+
 public sealed class RpcException : LauncherException
 {
     public RpcException(string method, int code, string message)

@@ -57,6 +57,8 @@ internal static class Program
                     MessageBoxImage.Warning);
             }
 
+            logger.SetTimeZone(settings.SelectedTimeZone);
+
             coordinator = new QuotaCoordinator(
                 settings,
                 new JsonFileStore<AppState>(AppPaths.StateFile),

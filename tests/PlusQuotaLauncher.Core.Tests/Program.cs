@@ -1,6 +1,9 @@
 using System.Text.Json;
 using PlusQuotaLauncher.Core;
 
+if (args is ["app-server", ..] && Environment.GetEnvironmentVariable("PLUS_QUOTA_FAKE_MODE") is { } serverMode)
+    return await RunFakeCodexAsync(serverMode, Environment.GetEnvironmentVariable("PLUS_QUOTA_FAKE_MARKER")!);
+
 var failures = new List<string>();
 
 void Check(bool condition, string name)
@@ -93,6 +96,57 @@ catch (LauncherException)
     Check(true, "invalid theme rejected");
 }
 
+if (OperatingSystem.IsWindows())
+{
+    var fixtureDirectory = Path.Combine(Path.GetTempPath(), "plus-quota-transport-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(fixtureDirectory);
+    try
+    {
+        var logPath = Path.Combine(fixtureDirectory, "launcher.log");
+        var logger = new AppLogger(logPath);
+        var china = TimeZoneInfo.FindSystemTimeZoneById("China Standard Time");
+        logger.SetTimeZone(china);
+        var before = DateTimeOffset.UtcNow;
+        logger.Info("timezone probe");
+        var after = DateTimeOffset.UtcNow;
+        var firstLine = File.ReadLines(logPath).Single();
+        var timestamp = firstLine[1..firstLine.IndexOf(']')];
+        var localTime = DateTimeOffset.ParseExact(timestamp[..26], "yyyy-MM-dd HH:mm:ss zzz", null);
+        Check(timestamp.EndsWith("China Standard Time") && localTime.Offset == TimeSpan.FromHours(8) &&
+              localTime >= before.AddSeconds(-1) && localTime <= after.AddSeconds(1),
+            "log timestamp follows selected timezone");
+        logger.SetTimeZone(TimeZoneInfo.Utc);
+        logger.Info("utc probe");
+        Check(File.ReadLines(logPath).Last().Contains("+00:00 UTC]"), "log timezone changes without rewriting history");
+
+        var testExecutable = Environment.ProcessPath!;
+        foreach (var mode in new[] { "malformed", "reader-ended" })
+        {
+            var marker = Path.Combine(fixtureDirectory, mode + ".marker");
+            Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MODE", mode);
+            Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MARKER", marker);
+            await using var client = new AppServerClient(testExecutable, logger);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            var snapshot = await client.ReadQuotaAsync(settings, timeout.Token);
+            Check(snapshot.Account.Type == "chatgpt" && snapshot.Window?.WindowDurationMinutes == 300,
+                $"quota read recovers from {mode}");
+            if (mode == "reader-ended")
+                Check(File.Exists(marker), "broken reader triggered reconnect");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex);
+        Check(false, "transport and timezone regression checks");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MODE", null);
+        Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MARKER", null);
+        Directory.Delete(fixtureDirectory, recursive: true);
+    }
+}
+
 if (Environment.GetEnvironmentVariable("PLUS_QUOTA_LIVE") == "1")
 {
     AppPaths.EnsureCreated();
@@ -112,3 +166,61 @@ if (failures.Count > 0)
 
 Console.WriteLine("All core regression tests passed.");
 return 0;
+
+static async Task<int> RunFakeCodexAsync(string mode, string marker)
+{
+    while (await Console.In.ReadLineAsync() is { } line)
+    {
+        using var request = JsonDocument.Parse(line);
+        if (!request.RootElement.TryGetProperty("id", out var id))
+            continue;
+        var method = request.RootElement.GetProperty("method").GetString();
+        if (method == "account/read" && mode == "reader-ended" && !File.Exists(marker))
+        {
+            File.WriteAllText(marker, "first connection closed stdout");
+            await Console.Out.WriteLineAsync("{not valid json");
+            await Console.Out.FlushAsync();
+            FakeConsoleWindows.CloseStandardOutput();
+            while (await Console.In.ReadLineAsync() is not null)
+            {
+            }
+            return 0;
+        }
+        if (method == "account/read" && mode == "malformed")
+        {
+            await Console.Out.WriteLineAsync("{not valid json");
+            await Console.Out.FlushAsync();
+        }
+        object result = method switch
+        {
+            "initialize" => new { },
+            "account/read" => new { account = new { type = "chatgpt", planType = "plus" } },
+            "account/rateLimits/read" => new
+            {
+                rateLimitsByLimitId = new
+                {
+                    codex = new
+                    {
+                        limitId = "codex",
+                        primary = new { usedPercent = 5, windowDurationMins = 300, resetsAt = DateTimeOffset.UtcNow.AddHours(5).ToUnixTimeSeconds() }
+                    }
+                }
+            },
+            _ => throw new InvalidOperationException($"Unexpected fake Codex request: {method}")
+        };
+        await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new { id = id.GetInt64(), result }));
+        await Console.Out.FlushAsync();
+    }
+    return 0;
+}
+
+internal static class FakeConsoleWindows
+{
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern IntPtr GetStdHandle(int stdHandle);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    public static void CloseStandardOutput() => CloseHandle(GetStdHandle(-11));
+}

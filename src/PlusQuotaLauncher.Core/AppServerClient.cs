@@ -17,6 +17,7 @@ public sealed class AppServerClient : IAsyncDisposable
     private Process? _process;
     private StreamWriter? _writer;
     private Task? _readLoop;
+    private volatile bool _connectionHealthy;
     private long _nextId;
 
     public AppServerClient(string codexPath, AppLogger logger)
@@ -25,24 +26,38 @@ public sealed class AppServerClient : IAsyncDisposable
         _logger = logger;
     }
 
-    public bool IsRunning => _process is { HasExited: false } && _writer is not null;
+    public bool IsRunning => _connectionHealthy &&
+                             _process is { HasExited: false } &&
+                             _writer is not null &&
+                             _readLoop is { IsCompleted: false };
 
     public async Task<QuotaSnapshot> ReadQuotaAsync(AppSettings settings, CancellationToken cancellationToken)
     {
-        var accountResult = await CallAsync(
-            "account/read",
-            new { refreshToken = false },
-            TimeSpan.FromSeconds(30),
-            cancellationToken);
-        var limitsResult = await CallAsync(
-            "account/rateLimits/read",
-            new { },
-            TimeSpan.FromSeconds(35),
-            cancellationToken);
-        return new QuotaSnapshot(
-            QuotaParser.ParseAccount(accountResult),
-            QuotaParser.ParseWindow(limitsResult, settings.LimitId, settings.WindowMinutes),
-            DateTimeOffset.UtcNow);
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                var accountResult = await CallAsync(
+                    "account/read",
+                    new { refreshToken = false },
+                    TimeSpan.FromSeconds(30),
+                    cancellationToken);
+                var limitsResult = await CallAsync(
+                    "account/rateLimits/read",
+                    new { },
+                    TimeSpan.FromSeconds(35),
+                    cancellationToken);
+                return new QuotaSnapshot(
+                    QuotaParser.ParseAccount(accountResult),
+                    QuotaParser.ParseWindow(limitsResult, settings.LimitId, settings.WindowMinutes),
+                    DateTimeOffset.UtcNow);
+            }
+            catch (AppServerConnectionException ex) when (attempt == 0 && !cancellationToken.IsCancellationRequested)
+            {
+                _connectionHealthy = false;
+                _logger.Warning($"Codex 连接中断，正在重新连接并重试额度读取：{ex.UserMessage}");
+            }
+        }
     }
 
     public async Task<string> StartThreadAsync(AppSettings settings, CancellationToken cancellationToken)
@@ -119,7 +134,10 @@ public sealed class AppServerClient : IAsyncDisposable
 
         try
         {
-            await WriteAsync(JsonSerializer.Serialize(new { id, method, @params = parameters }), cancellationToken);
+            await WriteAsync(
+                JsonSerializer.Serialize(new { id, method, @params = parameters }),
+                cancellationToken,
+                outcomeUncertainOnTimeout);
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
             timeoutCts.CancelAfter(timeout);
             RpcReply reply;
@@ -129,11 +147,20 @@ public sealed class AppServerClient : IAsyncDisposable
             }
             catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && !_lifetime.IsCancellationRequested)
             {
-                throw new LauncherException(
+                _connectionHealthy = false;
+                throw new AppServerConnectionException(
                     $"Codex 请求 {method} 在 {timeout.TotalSeconds:0} 秒内没有响应。",
-                    "确认网络正常且 Codex CLI 没有被安全软件拦截，然后查看日志。",
+                    "程序会重建 Codex 连接；如果仍无法读取，请确认 Codex CLI 和网络状态，并查看日志。",
                     ex,
                     outcomeUncertainOnTimeout);
+            }
+            catch (AppServerConnectionException ex) when (outcomeUncertainOnTimeout && !ex.OutcomeUncertain)
+            {
+                throw new AppServerConnectionException(
+                    ex.UserMessage,
+                    "请求结果不确定，请先查看日志，避免重复发送。",
+                    ex,
+                    outcomeUncertain: true);
             }
             if (reply.ErrorCode.HasValue)
                 throw new RpcException(method, reply.ErrorCode.Value, reply.ErrorMessage ?? "未知错误");
@@ -180,13 +207,24 @@ public sealed class AppServerClient : IAsyncDisposable
             _writer.AutoFlush = true;
             _readLoop = Task.Run(() => ReadLoopAsync(_process.StandardOutput, _lifetime.Token), _lifetime.Token);
 
-            await CallCoreAsync(
-                "initialize",
-                new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.2.0" } },
-                TimeSpan.FromSeconds(25),
-                cancellationToken);
-            await WriteAsync(JsonSerializer.Serialize(new { method = "initialized", @params = new { } }), cancellationToken);
-            _logger.Info($"已连接 Codex App Server：{resolved}");
+            try
+            {
+                await CallCoreAsync(
+                    "initialize",
+                    new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.3.0" } },
+                    TimeSpan.FromSeconds(25),
+                    cancellationToken);
+                await WriteAsync(JsonSerializer.Serialize(new { method = "initialized", @params = new { } }), cancellationToken);
+                if (_process.HasExited || _readLoop is not { IsCompleted: false })
+                    throw new AppServerConnectionException("Codex App Server 初始化后立即断开。", "程序会重新连接；如持续发生，请查看诊断日志。");
+                _connectionHealthy = true;
+                _logger.Info($"已连接 Codex App Server：{resolved}");
+            }
+            catch
+            {
+                await StopProcessAsync();
+                throw;
+            }
         }
         finally
         {
@@ -204,25 +242,42 @@ public sealed class AppServerClient : IAsyncDisposable
                 var line = await reader.ReadLineAsync(cancellationToken);
                 if (line is null)
                     break;
-                using var document = JsonDocument.Parse(line);
-                var root = document.RootElement;
-                if (!root.TryGetProperty("id", out var idElement) || !idElement.TryGetInt64(out var id))
-                    continue;
-                if (!_pending.TryRemove(id, out var completion))
-                    continue;
-                if (root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
+                JsonDocument document;
+                try
                 {
-                    var code = error.TryGetProperty("code", out var codeElement) && codeElement.TryGetInt32(out var parsedCode) ? parsedCode : -1;
-                    var message = error.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : "未知错误";
-                    completion.TrySetResult(new RpcReply(default, code, message));
+                    document = JsonDocument.Parse(line);
                 }
-                else if (root.TryGetProperty("result", out var result))
+                catch (JsonException ex)
                 {
-                    completion.TrySetResult(new RpcReply(result.Clone(), null, null));
+                    _logger.Warning($"Codex App Server 输出了无效的 JSON，已跳过该行：{ex.Message}");
+                    continue;
                 }
-                else
+                using (document)
                 {
-                    completion.TrySetResult(new RpcReply(default, -1, "响应中缺少 result"));
+                    var root = document.RootElement;
+                    if (root.ValueKind != JsonValueKind.Object)
+                    {
+                        _logger.Warning("Codex App Server 输出的 JSON 不是对象，已跳过该行。");
+                        continue;
+                    }
+                    if (!root.TryGetProperty("id", out var idElement) || !idElement.TryGetInt64(out var id))
+                        continue;
+                    if (!_pending.TryRemove(id, out var completion))
+                        continue;
+                    if (root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
+                    {
+                        var code = error.TryGetProperty("code", out var codeElement) && codeElement.TryGetInt32(out var parsedCode) ? parsedCode : -1;
+                        var message = error.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : "未知错误";
+                        completion.TrySetResult(new RpcReply(default, code, message));
+                    }
+                    else if (root.TryGetProperty("result", out var result))
+                    {
+                        completion.TrySetResult(new RpcReply(result.Clone(), null, null));
+                    }
+                    else
+                    {
+                        completion.TrySetResult(new RpcReply(default, -1, "响应中缺少 result"));
+                    }
                 }
             }
         }
@@ -236,7 +291,8 @@ public sealed class AppServerClient : IAsyncDisposable
         }
         finally
         {
-            var exception = new LauncherException(
+            _connectionHealthy = false;
+            var exception = new AppServerConnectionException(
                 "Codex App Server 已断开。",
                 "应用会在下次操作时重新连接；如果问题持续出现，请更新 Codex CLI。",
                 failure);
@@ -246,19 +302,24 @@ public sealed class AppServerClient : IAsyncDisposable
         }
     }
 
-    private async Task WriteAsync(string line, CancellationToken cancellationToken)
+    private async Task WriteAsync(string line, CancellationToken cancellationToken, bool outcomeUncertainOnWriteFailure = false)
     {
         await _writeGate.WaitAsync(cancellationToken);
         try
         {
             if (_writer is null)
-                throw new LauncherException("Codex App Server 尚未连接。", "稍后重试，或重启应用。");
+                throw new AppServerConnectionException("Codex App Server 尚未连接。", "程序会在下次操作时重新连接。");
             await _writer.WriteLineAsync(line.AsMemory(), cancellationToken);
             await _writer.FlushAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            throw new LauncherException("无法向 Codex App Server 发送请求。", "重启应用并确认 Codex CLI 工作正常。", ex);
+            _connectionHealthy = false;
+            throw new AppServerConnectionException(
+                "无法向 Codex App Server 发送请求。",
+                "程序会在下次操作时重新连接；如已发送任务，请先查看日志。",
+                ex,
+                outcomeUncertainOnWriteFailure);
         }
         finally
         {
@@ -327,6 +388,7 @@ public sealed class AppServerClient : IAsyncDisposable
     private async Task StopProcessAsync()
     {
         var process = _process;
+        _connectionHealthy = false;
         _process = null;
         _writer = null;
         if (process is null)
@@ -349,6 +411,7 @@ public sealed class AppServerClient : IAsyncDisposable
         }
         finally
         {
+            _readLoop = null;
             process.Dispose();
         }
     }

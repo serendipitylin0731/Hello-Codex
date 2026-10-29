@@ -187,6 +187,7 @@ public partial class MainWindow : Window
             _settingsStore.Save(updated);
             AutoStartManager.SetEnabled(AutoStartBox.IsChecked == true);
             _settings = updated;
+            _logger.SetTimeZone(updated.SelectedTimeZone);
             _logger.Info("设置已保存。");
             if (showSuccess)
             {
@@ -471,7 +472,7 @@ public partial class MainWindow : Window
         SafeUi(() =>
         {
             _recentEventIsError = entry.Level == "ERROR";
-            RecentEventText.Text = $"{entry.Timestamp:HH:mm}  {FriendlyEvent(entry)}";
+            RecentEventText.Text = $"{_logger.InSelectedTimeZone(entry.Timestamp):HH:mm}  {FriendlyEvent(entry)}";
             RecentEventText.Foreground = _recentEventIsError
                 ? BrushFrom("#B4232A")
                 : (System.Windows.Media.Brush)Resources["MutedBrush"];

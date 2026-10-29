@@ -62,7 +62,8 @@ public sealed class QuotaCoordinator : IAsyncDisposable
 
             var window = snapshot.Window;
             var remaining = window.ResetUtc - DateTimeOffset.UtcNow;
-            _logger.Info($"额度窗口 reset={window.ResetUtc:O} remaining={remaining} used={window.UsedPercent}");
+            var localReset = SchedulePolicy.InSelectedTimeZone(window.ResetUtc, _settings);
+            _logger.Info($"额度窗口 reset={localReset:O} [{_settings.TimeZoneId}] remaining={remaining} used={window.UsedPercent}");
             if (!automatic || !SchedulePolicy.ShouldAutoSend(DateTimeOffset.UtcNow, window, _settings))
                 return new CoordinatorStatus(CoordinatorState.Waiting, "额度已更新，当前无需自动发送。", snapshot);
             if (_state.LastSuccessResetAt == window.ResetsAt)
