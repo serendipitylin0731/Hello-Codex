@@ -49,7 +49,7 @@ jobs:
       - name: Build single-file installer
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '2.4.3' }
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '2.4.4' }
           $publish = (Resolve-Path 'artifacts/publish').Path
           $output = Join-Path $PWD 'artifacts/installer'
           New-Item -ItemType Directory -Force -Path $output | Out-Null

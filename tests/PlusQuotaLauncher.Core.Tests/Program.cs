@@ -202,14 +202,31 @@ if (OperatingSystem.IsWindows())
             Environment.SetEnvironmentVariable("PATH", fixtureDirectory);
             Check(AppServerClient.ResolveCodexPath("codex") == installedCodex,
                 "Codex CLI resolves from user installation with stale PATH");
+            var missingCodex = Path.Combine(fixtureDirectory, "missing-codex.exe");
+            Check(AppServerClient.ResolveCodexPath(missingCodex) == missingCodex,
+                "explicit Codex path is passed to Windows instead of trusting File.Exists");
+
+            var delayedCodex = Path.Combine(fixtureDirectory, "delayed-codex.exe");
+            var createDelayedCodex = Task.Run(async () =>
+            {
+                await Task.Delay(350);
+                File.WriteAllText(delayedCodex, "test executable marker");
+            });
+            using var resolutionTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            Check(await AppServerClient.ResolveCodexPathWithRetryAsync("delayed-codex", resolutionTimeout.Token) == delayedCodex,
+                "temporarily unavailable Codex command is retried");
+            await createDelayedCodex;
+
+            await using var missingClient = new AppServerClient(missingCodex, logger);
+            using var missingTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
-                AppServerClient.ResolveCodexPath(Path.Combine(fixtureDirectory, "missing-codex.exe"));
-                Check(false, "explicit missing Codex path is rejected");
+                await missingClient.ReadQuotaAsync(settings, missingTimeout.Token);
+                Check(false, "Windows startup error is reported for missing explicit path");
             }
-            catch (LauncherException)
+            catch (LauncherException ex) when (ex.InnerException is System.ComponentModel.Win32Exception)
             {
-                Check(true, "explicit missing Codex path is rejected");
+                Check(true, "Windows startup error is reported for missing explicit path");
             }
         }
         finally

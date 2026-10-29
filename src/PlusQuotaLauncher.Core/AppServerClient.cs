@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -182,26 +183,8 @@ public sealed class AppServerClient : IAsyncDisposable
             if (IsRunning)
                 return;
             await StopProcessAsync();
-            var resolved = ResolveCodexPath(_codexPath);
-            var startInfo = BuildStartInfo(resolved);
-            _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            _process.ErrorDataReceived += (_, args) =>
-            {
-                if (!string.IsNullOrWhiteSpace(args.Data))
-                    _logger.Warning("Codex: " + args.Data);
-            };
-            try
-            {
-                if (!_process.Start())
-                    throw new InvalidOperationException("Process.Start returned false.");
-            }
-            catch (Exception ex)
-            {
-                throw new LauncherException(
-                    "无法启动 Codex CLI。",
-                    "安装官方 Codex CLI，执行 codex login，并检查设置中的 CLI 路径。",
-                    ex);
-            }
+            var resolved = await ResolveCodexPathWithRetryAsync(_codexPath, cancellationToken);
+            _process = await StartCodexProcessAsync(resolved, cancellationToken);
             _process.BeginErrorReadLine();
             _writer = _process.StandardInput;
             _writer.AutoFlush = true;
@@ -211,7 +194,7 @@ public sealed class AppServerClient : IAsyncDisposable
             {
                 await CallCoreAsync(
                     "initialize",
-                    new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.4.3" } },
+                    new { clientInfo = new { name = "chatgpt_plus_quota_launcher", title = "ChatGPT Plus 额度启动器", version = "2.4.4" } },
                     TimeSpan.FromSeconds(25),
                     cancellationToken);
                 await WriteAsync(JsonSerializer.Serialize(new { method = "initialized", @params = new { } }), cancellationToken);
@@ -327,6 +310,21 @@ public sealed class AppServerClient : IAsyncDisposable
         }
     }
 
+    internal static async Task<string> ResolveCodexPathWithRetryAsync(string configuredPath, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return ResolveCodexPath(configuredPath);
+            }
+            catch (LauncherException ex) when (attempt < 2 && ex.UserMessage.StartsWith("找不到 Codex CLI", StringComparison.Ordinal))
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+        }
+    }
+
     internal static string ResolveCodexPath(string configuredPath)
     {
         var expanded = Environment.ExpandEnvironmentVariables(configuredPath.Trim().Trim('"'));
@@ -334,7 +332,7 @@ public sealed class AppServerClient : IAsyncDisposable
             return Path.GetFullPath(expanded);
         if (Path.IsPathRooted(expanded) || expanded.Contains(Path.DirectorySeparatorChar) ||
             expanded.Contains(Path.AltDirectorySeparatorChar))
-            throw new LauncherException($"找不到 Codex CLI：{expanded}", "在设置中选择有效的 codex.exe 或 codex.cmd。");
+            return Path.GetFullPath(expanded);
 
         var names = Path.HasExtension(expanded)
             ? new[] { expanded }
@@ -396,6 +394,39 @@ public sealed class AppServerClient : IAsyncDisposable
         throw new LauncherException(
             "找不到 Codex CLI。",
             "在高级设置中浏览并选择 codex.exe 或 codex.cmd；安装后也可以重新登录 Windows 再试。");
+    }
+
+    private async Task<Process> StartCodexProcessAsync(string resolvedPath, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var process = new Process { StartInfo = BuildStartInfo(resolvedPath), EnableRaisingEvents = true };
+            process.ErrorDataReceived += (_, args) =>
+            {
+                if (!string.IsNullOrWhiteSpace(args.Data))
+                    _logger.Warning("Codex: " + args.Data);
+            };
+            try
+            {
+                if (!process.Start())
+                    throw new InvalidOperationException("Process.Start returned false.");
+                return process;
+            }
+            catch (Win32Exception ex) when (attempt < 2 && ex.NativeErrorCode is 2 or 3 or 5)
+            {
+                process.Dispose();
+                _logger.Warning($"Codex CLI 暂时无法启动，2 秒后重试：{ex.Message}");
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                process.Dispose();
+                throw new LauncherException(
+                    $"无法启动 Codex CLI：{resolvedPath}",
+                    "在高级设置中确认 CLI 路径，并查看诊断日志中的 Windows 错误。",
+                    ex);
+            }
+        }
     }
 
     private static ProcessStartInfo BuildStartInfo(string resolvedPath)

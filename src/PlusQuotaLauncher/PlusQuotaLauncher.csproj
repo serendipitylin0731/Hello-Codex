@@ -11,7 +11,7 @@
     <AssemblyName>ChatGPTPlusQuotaLauncher</AssemblyName>
     <RootNamespace>PlusQuotaLauncher</RootNamespace>
     <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
-    <Version>2.4.3</Version>
+    <Version>2.4.4</Version>
     <Authors>serendipitylin0731</Authors>
     <Product>ChatGPT Plus 额度启动器</Product>
     <Description>为 ChatGPT Plus 订阅用户设计的 Codex 额度启动器</Description>
