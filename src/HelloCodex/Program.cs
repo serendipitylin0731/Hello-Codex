@@ -89,10 +89,10 @@ internal static class Program
                 new JsonFileStore<AppState>(AppPaths.StateFile),
                 logger);
             var startHidden = args.Any(arg => arg.Equals("--background", StringComparison.OrdinalIgnoreCase));
-            mainWindow = new MainWindow(settings, settingsStore, coordinator, logger, startHidden);
+            mainWindow = new MainWindow(settings, settingsStore, coordinator, logger);
             application.MainWindow = mainWindow;
             singleInstance.StartListening(() => mainWindow.Dispatcher.BeginInvoke(mainWindow.RestoreFromTray));
-            mainWindow.Show();
+            mainWindow.Start(startHidden);
             application.Run();
             mainWindow.FinishAsync().GetAwaiter().GetResult();
         }

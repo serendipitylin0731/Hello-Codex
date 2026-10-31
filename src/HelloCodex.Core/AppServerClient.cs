@@ -194,7 +194,7 @@ public sealed class AppServerClient : IAsyncDisposable
             {
                 await CallCoreAsync(
                     "initialize",
-                    new { clientInfo = new { name = "hello_codex", title = "Hello! Codex", version = "3.0.0" } },
+                    new { clientInfo = new { name = "hello_codex", title = "Hello! Codex", version = "3.0.1" } },
                     TimeSpan.FromSeconds(25),
                     cancellationToken);
                 await WriteAsync(JsonSerializer.Serialize(new { method = "initialized", @params = new { } }), cancellationToken);

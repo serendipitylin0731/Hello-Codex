@@ -26,7 +26,6 @@ public partial class MainWindow : Window
     private readonly JsonFileStore<AppSettings> _settingsStore;
     private readonly QuotaCoordinator _coordinator;
     private readonly AppLogger _logger;
-    private readonly bool _startHidden;
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly DrawingIcon _trayDrawingIcon;
     private readonly Dictionary<DayOfWeek, TimeRangeTimeline> _weekdayTimelines = [];
@@ -48,15 +47,12 @@ public partial class MainWindow : Window
         AppSettings settings,
         JsonFileStore<AppSettings> settingsStore,
         QuotaCoordinator coordinator,
-        AppLogger logger,
-        bool startHidden)
+        AppLogger logger)
     {
         _settings = settings;
         _settingsStore = settingsStore;
         _coordinator = coordinator;
         _logger = logger;
-        _startHidden = startHidden;
-
         InitializeComponent();
         foreach (var day in Weekdays)
             _weekdayTimelines[day] = new TimeRangeTimeline();
@@ -80,7 +76,6 @@ public partial class MainWindow : Window
         _trayIcon.DoubleClick += (_, _) => SafeUi(RestoreFromTray);
 
         _logger.EntryWritten += OnLogEntry;
-        Loaded += OnLoaded;
         Closing += OnClosing;
         Closed += OnClosed;
         StateChanged += (_, _) => MaximizeGlyph.Text = WindowState == WindowState.Maximized ? "❐" : "□";
@@ -552,11 +547,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnLoaded(object sender, RoutedEventArgs eventArgs)
+    public void Start(bool startHidden)
     {
+        if (startHidden)
+            ShowInTaskbar = false;
+        else
+            Show();
         _todayTimer.Start();
-        if (_startHidden)
-            HideToTray(false);
         if (_settings.StartMonitoringOnLaunch)
             StartMonitoring();
     }
