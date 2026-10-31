@@ -19,6 +19,7 @@ public sealed class AppServerClient : IAsyncDisposable
     private StreamWriter? _writer;
     private Task? _readLoop;
     private volatile bool _connectionHealthy;
+    private string? _loadedThreadId;
     private long _nextId;
 
     public AppServerClient(string codexPath, AppLogger logger)
@@ -79,7 +80,20 @@ public sealed class AppServerClient : IAsyncDisposable
             !thread.TryGetProperty("id", out var id) ||
             string.IsNullOrWhiteSpace(id.GetString()))
             throw new LauncherException("Codex 创建会话后没有返回 thread ID。", "更新 Codex CLI 后重试；如仍失败，请查看日志。 ");
-        return id.GetString()!;
+        _loadedThreadId = id.GetString()!;
+        return _loadedThreadId;
+    }
+
+    public async Task ResumeThreadAsync(string threadId, CancellationToken cancellationToken)
+    {
+        await EnsureStartedAsync(cancellationToken);
+        if (string.Equals(_loadedThreadId, threadId, StringComparison.Ordinal))
+            return;
+        var result = await CallAsync("thread/resume", new { threadId, excludeTurns = true }, TimeSpan.FromSeconds(30), cancellationToken);
+        if (!result.TryGetProperty("thread", out var thread) ||
+            !thread.TryGetProperty("id", out var id) || id.GetString() != threadId)
+            throw new LauncherException("Codex 恢复会话时返回的会话 ID 不匹配。", "请查看诊断日志并重试。");
+        _loadedThreadId = threadId;
     }
 
     public async Task<SendReceipt> StartTurnAsync(AppSettings settings, string threadId, CancellationToken cancellationToken)
@@ -194,7 +208,7 @@ public sealed class AppServerClient : IAsyncDisposable
             {
                 await CallCoreAsync(
                     "initialize",
-                    new { clientInfo = new { name = "hello_codex", title = "Hello! Codex", version = "3.0.1" } },
+                    new { clientInfo = new { name = "hello_codex", title = "Hello! Codex", version = "3.1.0" } },
                     TimeSpan.FromSeconds(25),
                     cancellationToken);
                 await WriteAsync(JsonSerializer.Serialize(new { method = "initialized", @params = new { } }), cancellationToken);
@@ -464,6 +478,7 @@ public sealed class AppServerClient : IAsyncDisposable
     {
         var process = _process;
         _connectionHealthy = false;
+        _loadedThreadId = null;
         _process = null;
         _writer = null;
         if (process is null)

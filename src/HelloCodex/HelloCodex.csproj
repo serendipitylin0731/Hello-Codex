@@ -11,7 +11,7 @@
     <AssemblyName>HelloCodex</AssemblyName>
     <RootNamespace>HelloCodex</RootNamespace>
     <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
-    <Version>3.0.1</Version>
+    <Version>3.1.0</Version>
     <Authors>serendipitylin0731</Authors>
     <Product>Hello! Codex</Product>
     <Description>为 ChatGPT Plus 订阅用户设计的 Codex 额度启动器</Description>

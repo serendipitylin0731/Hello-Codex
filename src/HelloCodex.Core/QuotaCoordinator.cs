@@ -98,7 +98,7 @@ public sealed class QuotaCoordinator : IAsyncDisposable
         try
         {
             var client = GetClient();
-            var threadId = await client.StartThreadAsync(_settings, cancellationToken);
+            var threadId = await GetOrCreateThreadAsync(client, cancellationToken);
             var receipt = await client.StartTurnAsync(_settings, threadId, cancellationToken);
             _logger.Info($"手动发送已接受：thread={receipt.ThreadId} turn={receipt.TurnId}");
             return receipt;
@@ -116,7 +116,7 @@ public sealed class QuotaCoordinator : IAsyncDisposable
 
     private async Task<SendReceipt> SendForWindowAsync(AppServerClient client, QuotaWindow window, CancellationToken cancellationToken)
     {
-        var threadId = await client.StartThreadAsync(_settings, cancellationToken);
+        var threadId = await GetOrCreateThreadAsync(client, cancellationToken);
         if (!SchedulePolicy.ShouldAutoSend(DateTimeOffset.UtcNow, window, _settings))
             throw new LauncherException("条件在发送前发生变化，已取消本次自动发送。", "程序会在下一个检查周期重新评估。");
 
@@ -145,6 +145,30 @@ public sealed class QuotaCoordinator : IAsyncDisposable
             _stateStore.Save(_state);
             throw;
         }
+    }
+
+    private async Task<string> GetOrCreateThreadAsync(AppServerClient client, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(_state.LastThreadId))
+        {
+            try
+            {
+                await client.ResumeThreadAsync(_state.LastThreadId, cancellationToken);
+                return _state.LastThreadId;
+            }
+            catch (RpcException ex) when (ex.Method == "thread/resume" && ex.Code == -32600 &&
+                                          ex.Detail.StartsWith("no rollout found for thread id ", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.Warning("原会话已不存在，将创建新的会话。");
+                _state.LastThreadId = string.Empty;
+                _stateStore.Save(_state);
+            }
+        }
+
+        var threadId = await client.StartThreadAsync(_settings, cancellationToken);
+        _state.LastThreadId = threadId;
+        _stateStore.Save(_state);
+        return threadId;
     }
 
     private AppServerClient GetClient()

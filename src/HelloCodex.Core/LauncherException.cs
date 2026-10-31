@@ -32,8 +32,10 @@ public sealed class RpcException : LauncherException
     {
         Method = method;
         Code = code;
+        Detail = message;
     }
 
     public string Method { get; }
     public int Code { get; }
+    public string Detail { get; }
 }

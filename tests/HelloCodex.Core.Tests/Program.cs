@@ -264,6 +264,67 @@ if (OperatingSystem.IsWindows())
             if (mode == "reader-ended")
                 Check(File.Exists(marker), "broken reader triggered reconnect");
         }
+
+        var reusableSettings = new AppSettings
+        {
+            CodexPath = testExecutable,
+            EnabledRanges = [new EnabledTimeRange(0, 1440)]
+        };
+        var stateFile = Path.Combine(fixtureDirectory, "reusable-state.json");
+        var stateStore = new JsonFileStore<AppState>(stateFile);
+        var reuseMarker = Path.Combine(fixtureDirectory, "reuse.requests");
+        Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MODE", "reuse");
+        Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MARKER", reuseMarker);
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+        {
+            await using (var coordinator = new QuotaCoordinator(reusableSettings, stateStore, logger))
+            {
+                var manual = await coordinator.SendManualAsync(timeout.Token);
+                var automatic = await coordinator.CheckAsync(true, timeout.Token);
+                Check(manual.ThreadId == "thread-1" && automatic.State == CoordinatorState.Sent,
+                    "manual and automatic sends use a shared thread");
+            }
+            await using (var restarted = new QuotaCoordinator(reusableSettings, stateStore, logger))
+            {
+                var manual = await restarted.SendManualAsync(timeout.Token);
+                Check(manual.ThreadId == "thread-1", "shared thread survives application restart");
+            }
+        }
+        var requests = File.ReadAllLines(reuseMarker);
+        Check(requests.Count(line => line == "thread/start") == 1 &&
+              requests.Count(line => line == "thread/resume|thread-1") == 1 &&
+              requests.Count(line => line == "turn/start|thread-1") == 3,
+            "one thread created and resumed once after restart for three turns");
+
+        foreach (var mode in new[] { "missing-thread", "resume-error" })
+        {
+            var marker = Path.Combine(fixtureDirectory, mode + ".requests");
+            var store = new JsonFileStore<AppState>(Path.Combine(fixtureDirectory, mode + ".json"));
+            store.Save(new AppState { LastThreadId = "missing-id" });
+            Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MODE", mode);
+            Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MARKER", marker);
+            await using var coordinator = new QuotaCoordinator(reusableSettings, store, logger);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            if (mode == "missing-thread")
+            {
+                var receipt = await coordinator.SendManualAsync(timeout.Token);
+                Check(receipt.ThreadId == "thread-1" && store.Load().LastThreadId == "thread-1",
+                    "confirmed missing thread is replaced and saved");
+            }
+            else
+            {
+                try
+                {
+                    await coordinator.SendManualAsync(timeout.Token);
+                    Check(false, "other resume errors do not create another thread");
+                }
+                catch (RpcException)
+                {
+                    Check(!File.ReadAllLines(marker).Contains("thread/start") && store.Load().LastThreadId == "missing-id",
+                        "other resume errors do not create another thread");
+                }
+            }
+        }
     }
     catch (Exception ex)
     {
@@ -306,6 +367,19 @@ static async Task<int> RunFakeCodexAsync(string mode, string marker)
         if (!request.RootElement.TryGetProperty("id", out var id))
             continue;
         var method = request.RootElement.GetProperty("method").GetString();
+        if (mode is "reuse" or "missing-thread" or "resume-error")
+        {
+            var param = request.RootElement.GetProperty("params");
+            var suffix = param.TryGetProperty("threadId", out var threadId) ? "|" + threadId.GetString() : "";
+            File.AppendAllText(marker, method + suffix + Environment.NewLine);
+            if (method == "thread/resume" && mode is "missing-thread" or "resume-error")
+            {
+                var message = mode == "missing-thread" ? "no rollout found for thread id missing-id" : "temporary failure";
+                await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new { id = id.GetInt64(), error = new { code = -32600, message } }));
+                await Console.Out.FlushAsync();
+                continue;
+            }
+        }
         if (method == "account/read" && mode == "reader-ended" && !File.Exists(marker))
         {
             File.WriteAllText(marker, "first connection closed stdout");
@@ -325,6 +399,9 @@ static async Task<int> RunFakeCodexAsync(string mode, string marker)
         object result = method switch
         {
             "initialize" => new { },
+            "thread/start" => new { thread = new { id = "thread-1" } },
+            "thread/resume" => new { thread = new { id = request.RootElement.GetProperty("params").GetProperty("threadId").GetString() } },
+            "turn/start" => new { turn = new { id = "turn-1", status = "inProgress" } },
             "account/read" => new { account = new { type = "chatgpt", planType = "plus" } },
             "account/rateLimits/read" => new
             {
