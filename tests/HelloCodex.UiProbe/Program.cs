@@ -12,7 +12,8 @@ internal static class Program
     {
         var directory = Path.Combine(Path.GetTempPath(), "HelloCodexUiProbe-" + Guid.NewGuid());
         Directory.CreateDirectory(directory);
-        var settings = new AppSettings { StartMonitoringOnLaunch = false };
+        // An empty schedule starts the monitor without making a Codex request.
+        var settings = new AppSettings { StartMonitoringOnLaunch = true, EnabledRanges = [] };
         var settingsStore = new JsonFileStore<AppSettings>(Path.Combine(directory, "settings.json"));
         var logger = new AppLogger(Path.Combine(directory, "probe.log"));
         var coordinator = new QuotaCoordinator(settings,
@@ -38,6 +39,9 @@ internal static class Program
                 if (window.IsVisible || window.ShowInTaskbar || new WindowInteropHelper(window).Handle != IntPtr.Zero || !tray.Visible)
                     throw new InvalidOperationException("后台启动时窗口已创建或可见，或托盘图标不可用。");
                 Console.WriteLine("PASS background start has no window and tray icon is present");
+                if (!File.ReadAllText(Path.Combine(directory, "probe.log")).Contains("额度监控已启动"))
+                    throw new InvalidOperationException("后台启动没有启动额度监控。");
+                Console.WriteLine("PASS monitoring starts while the window is hidden");
 
                 window.RestoreFromTray();
                 await Task.Delay(500);
