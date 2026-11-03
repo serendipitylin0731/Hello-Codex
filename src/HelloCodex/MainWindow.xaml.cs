@@ -253,7 +253,7 @@ public partial class MainWindow : Window
                 CoordinatorStatus status;
                 try
                 {
-                    status = await _coordinator.CheckAsync(true, token);
+                    status = await _coordinator.CheckAutomaticWithRetryAsync(token);
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
@@ -263,7 +263,7 @@ public partial class MainWindow : Window
                 {
                     ApplyStatus(status);
                     if (status.State == CoordinatorState.Error && status.Error is not null)
-                        NotifyBackgroundError(status.Error);
+                        NotifyBackgroundError(status.Error, status.CanRetry);
                     if (status.State == CoordinatorState.Sent)
                         ShowBalloon("自动任务已启动", status.Summary, Forms.ToolTipIcon.Info);
                 });
@@ -327,7 +327,7 @@ public partial class MainWindow : Window
                 return;
             var confirmation = WpfMessageBox.Show(
                 this,
-                $"将立即创建新的 Codex 会话并发送：\n\n{_settings.Message}\n\n本操作会忽略启用时间和额度阈值，并消耗 ChatGPT Plus/Codex 使用额度。是否继续？",
+                $"将立即在 Codex 会话中发送：\n\n{_settings.Message}\n\n本操作会忽略启用时间和额度阈值，并消耗 ChatGPT Plus/Codex 使用额度。是否继续？",
                 "确认手动发送",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning,
@@ -503,14 +503,14 @@ public partial class MainWindow : Window
         return entry.Message.Length <= 42 ? entry.Message : entry.Message[..42] + "…";
     }
 
-    private void NotifyBackgroundError(Exception exception)
+    private void NotifyBackgroundError(Exception exception, bool retried)
     {
         var text = QuotaCoordinator.FriendlyMessage(exception);
         if (text == _lastErrorText && DateTimeOffset.UtcNow - _lastErrorNotification < TimeSpan.FromMinutes(10))
             return;
         _lastErrorText = text;
         _lastErrorNotification = DateTimeOffset.UtcNow;
-        ShowBalloon("额度监控遇到问题", text + "；打开主窗口查看详情。", Forms.ToolTipIcon.Error);
+        ShowBalloon("额度监控遇到问题", (retried ? "重试 3 次后仍未恢复：" : "") + text + "；打开主窗口查看详情。", Forms.ToolTipIcon.Error);
     }
 
     private void ShowBalloon(string title, string text, Forms.ToolTipIcon icon)

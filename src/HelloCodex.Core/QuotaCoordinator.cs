@@ -2,6 +2,7 @@ namespace HelloCodex.Core;
 
 public sealed class QuotaCoordinator : IAsyncDisposable
 {
+    private const int AutomaticRetryCount = 3;
     private readonly AppLogger _logger;
     private readonly JsonFileStore<AppState> _stateStore;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
@@ -45,11 +46,13 @@ public sealed class QuotaCoordinator : IAsyncDisposable
             return new CoordinatorStatus(CoordinatorState.Disabled, "当前不在启用时间，未查询额度。");
 
         await _operationGate.WaitAsync(cancellationToken);
+        var quotaReadCompleted = false;
         try
         {
             _logger.Info(automatic ? "开始自动额度检查。" : "开始手动额度检查。");
             var client = GetClient();
             var snapshot = await client.ReadQuotaAsync(_settings, cancellationToken);
+            quotaReadCompleted = true;
             if (snapshot.Account.Type != "chatgpt")
                 _logger.Warning($"当前 Codex 登录类型为 {snapshot.Account.Type}，不是 ChatGPT 订阅登录。");
             if (snapshot.Window is null)
@@ -83,12 +86,38 @@ public sealed class QuotaCoordinator : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.Error("额度检查失败。", ex);
-            return new CoordinatorStatus(CoordinatorState.Error, FriendlyMessage(ex), Error: ex);
+            if (!automatic)
+                _logger.Error("额度检查失败。", ex);
+            var uncertain = ex is LauncherException { OutcomeUncertain: true };
+            var canRetry = !uncertain && (!quotaReadCompleted || ex is RpcException { Method: "thread/resume" });
+            return new CoordinatorStatus(CoordinatorState.Error, FriendlyMessage(ex), Error: ex, CanRetry: canRetry);
         }
         finally
         {
             _operationGate.Release();
+        }
+    }
+
+    public Task<CoordinatorStatus> CheckAutomaticWithRetryAsync(CancellationToken cancellationToken) =>
+        CheckAutomaticWithRetryAsync(cancellationToken,
+            TimeSpan.FromSeconds(Math.Min(10, Math.Max(1, _settings.PollSeconds / 3.0))));
+
+    internal async Task<CoordinatorStatus> CheckAutomaticWithRetryAsync(CancellationToken cancellationToken, TimeSpan retryDelay)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var status = await CheckAsync(true, cancellationToken);
+            if (status.State != CoordinatorState.Error)
+                return status;
+            if (!status.CanRetry || attempt >= AutomaticRetryCount)
+            {
+                _logger.Error("额度监控失败。", status.Error);
+                return status.CanRetry
+                    ? status with { Summary = $"重试 {AutomaticRetryCount} 次后仍失败：{status.Summary}" }
+                    : status;
+            }
+            _logger.Warning($"额度检查暂时失败，正在重试（{attempt + 1}/{AutomaticRetryCount}）。", status.Error);
+            await Task.Delay(retryDelay, cancellationToken);
         }
     }
 

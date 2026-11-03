@@ -325,6 +325,56 @@ if (OperatingSystem.IsWindows())
                 }
             }
         }
+
+        foreach (var mode in new[] { "quota-flaky", "quota-unavailable", "turn-uncertain" })
+        {
+            var marker = Path.Combine(fixtureDirectory, mode + ".requests");
+            var store = new JsonFileStore<AppState>(Path.Combine(fixtureDirectory, mode + ".json"));
+            var retryLogPath = Path.Combine(fixtureDirectory, mode + ".log");
+            var retryLogger = new AppLogger(retryLogPath);
+            Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MODE", mode);
+            Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MARKER", marker);
+            await using var coordinator = new QuotaCoordinator(reusableSettings, store, retryLogger);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var status = await coordinator.CheckAutomaticWithRetryAsync(timeout.Token, TimeSpan.Zero);
+            var lines = File.ReadAllLines(marker);
+            var errors = File.ReadAllLines(retryLogPath).Count(line => line.Contains("[ERROR]"));
+            if (mode == "quota-flaky")
+                Check(status.State == CoordinatorState.Waiting && lines.Count(line => line == "account/rateLimits/read") == 3 && errors == 0,
+                    "transient quota failures recover without an error report");
+            else if (mode == "quota-unavailable")
+                Check(status.State == CoordinatorState.Error && lines.Count(line => line == "account/rateLimits/read") == 4 && errors == 1,
+                    "persistent quota failure is reported after three retries");
+            else
+                Check(status.State == CoordinatorState.Error && lines.Count(line => line == "turn/start|thread-1") == 1 &&
+                      store.Load().PendingResetAt != 0 && errors == 1,
+                    "uncertain send is reported without retry and remains pending");
+        }
+
+        {
+            var marker = Path.Combine(fixtureDirectory, "retry-cancel.requests");
+            var retryLogPath = Path.Combine(fixtureDirectory, "retry-cancel.log");
+            var store = new JsonFileStore<AppState>(Path.Combine(fixtureDirectory, "retry-cancel.json"));
+            Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MODE", "quota-unavailable");
+            Environment.SetEnvironmentVariable("PLUS_QUOTA_FAKE_MARKER", marker);
+            await using var coordinator = new QuotaCoordinator(reusableSettings, store, new AppLogger(retryLogPath));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var retryTask = coordinator.CheckAutomaticWithRetryAsync(timeout.Token, TimeSpan.FromSeconds(30));
+            try
+            {
+                while (!File.ReadAllText(retryLogPath).Contains("[WARN]"))
+                    await Task.Delay(50, timeout.Token);
+                timeout.Cancel();
+                await retryTask;
+                Check(false, "stopping monitoring cancels retry wait");
+            }
+            catch (OperationCanceledException)
+            {
+                Check(File.ReadAllLines(marker).Count(line => line == "account/rateLimits/read") == 1 &&
+                      !File.ReadAllLines(retryLogPath).Any(line => line.Contains("[ERROR]")),
+                    "stopping monitoring cancels retry wait");
+            }
+        }
     }
     catch (Exception ex)
     {
@@ -361,17 +411,31 @@ return 0;
 
 static async Task<int> RunFakeCodexAsync(string mode, string marker)
 {
+    var quotaFailures = 0;
     while (await Console.In.ReadLineAsync() is { } line)
     {
         using var request = JsonDocument.Parse(line);
         if (!request.RootElement.TryGetProperty("id", out var id))
             continue;
         var method = request.RootElement.GetProperty("method").GetString();
-        if (mode is "reuse" or "missing-thread" or "resume-error")
+        if (mode is "reuse" or "missing-thread" or "resume-error" or "quota-flaky" or "quota-unavailable" or "turn-uncertain")
         {
             var param = request.RootElement.GetProperty("params");
             var suffix = param.TryGetProperty("threadId", out var threadId) ? "|" + threadId.GetString() : "";
             File.AppendAllText(marker, method + suffix + Environment.NewLine);
+            if (method == "account/rateLimits/read" &&
+                (mode == "quota-unavailable" || mode == "quota-flaky" && quotaFailures++ < 2))
+            {
+                await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new { id = id.GetInt64(), error = new { code = -32603, message = "temporary network failure" } }));
+                await Console.Out.FlushAsync();
+                continue;
+            }
+            if (method == "turn/start" && mode == "turn-uncertain")
+            {
+                FakeConsoleWindows.CloseStandardOutput();
+                while (await Console.In.ReadLineAsync() is not null) { }
+                return 0;
+            }
             if (method == "thread/resume" && mode is "missing-thread" or "resume-error")
             {
                 var message = mode == "missing-thread" ? "no rollout found for thread id missing-id" : "temporary failure";
@@ -410,7 +474,7 @@ static async Task<int> RunFakeCodexAsync(string mode, string marker)
                     codex = new
                     {
                         limitId = "codex",
-                        primary = new { usedPercent = 5, windowDurationMins = 300, resetsAt = DateTimeOffset.UtcNow.AddHours(5).ToUnixTimeSeconds() }
+                        primary = new { usedPercent = 5, windowDurationMins = 300, resetsAt = DateTimeOffset.UtcNow.AddHours(mode is "quota-flaky" or "quota-unavailable" ? 4 : 5).ToUnixTimeSeconds() }
                     }
                 }
             },

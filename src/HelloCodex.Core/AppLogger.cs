@@ -32,7 +32,8 @@ public sealed class AppLogger
     }
 
     public void Info(string message) => Write(new LogEntry(DateTimeOffset.UtcNow, "INFO", message));
-    public void Warning(string message) => Write(new LogEntry(DateTimeOffset.UtcNow, "WARN", message));
+    public void Warning(string message, Exception? exception = null) =>
+        Write(new LogEntry(DateTimeOffset.UtcNow, "WARN", message, exception));
     public void Error(string message, Exception? exception = null) =>
         Write(new LogEntry(DateTimeOffset.UtcNow, "ERROR", message, exception));
 

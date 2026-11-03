@@ -34,4 +34,5 @@ public sealed record CoordinatorStatus(
     CoordinatorState State,
     string Summary,
     QuotaSnapshot? Snapshot = null,
-    Exception? Error = null);
+    Exception? Error = null,
+    bool CanRetry = false);
